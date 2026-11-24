@@ -50,7 +50,7 @@ export function planMediaMarkers(segments: ReplySegment[], media: AgentMediaRow[
   }
   const missing = [...requested].filter(kind => !existing.has(kind));
   return {
-    matched, missing,
+    matched, missing, content: parts.filter((part): part is ReplySegment => part.kind !== 'placeholder'),
     resolve(recovered: Map<AgentMediaKind, ReplySegment>) {
       const used = new Set<AgentMediaKind>();
       return parts.flatMap((part): ReplySegment[] => {

@@ -8,7 +8,7 @@ import { supportsModelTemperature } from '@/lib/ai/modelCapabilities';
 import { AiUsageError, failUsage, requireUsageContext } from '@/lib/ai-usage/context';
 import { meterLanguageModel } from '@/lib/ai-usage/meteredModel';
 import { PROVIDER_LABELS } from './catalog';
-import { WaAgentError } from './errors';
+import { dbFailure, WaAgentError } from './errors';
 import type { AgentProvider, AgentRow } from './types';
 
 const ORG_KEY_COLUMN: Record<AgentProvider, 'ai_openai_key' | 'ai_anthropic_key' | 'ai_google_key'> = {
@@ -24,11 +24,12 @@ export async function getOrganizationApiKey(
   provider: AgentProvider
 ): Promise<string> {
   const column = ORG_KEY_COLUMN[provider];
-  const { data } = await admin
+  const { data, error } = await admin
     .from('organization_settings')
     .select('ai_openai_key, ai_anthropic_key, ai_google_key')
     .eq('organization_id', organizationId)
     .maybeSingle();
+  if (error) throw dbFailure(error);
   const row = (data ?? {}) as Record<string, string | null>;
   return (row[column] ?? '').trim();
 }

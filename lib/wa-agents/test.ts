@@ -1,4 +1,5 @@
 import { resolveReturnTime } from './scheduledReturnTime';
+import { loadFollowupCalendar } from './followupCalendarStore';
 /**
  * Teste de um agente no painel: mesma montagem de prompt e ferramentas, com
  * contexto fictício, sem enviar nada e sem executar ações. As ferramentas
@@ -215,7 +216,7 @@ async function testAgentReplyWithUsage(
       },
     } : {}),
     scheduledReturn: {
-      inspect: async () => ({ now: new Date().toISOString(), timezone: 'America/Sao_Paulo', pending: simulatedReturn, simulated: true }),
+      inspect: async () => ({ now: new Date().toISOString(), timezone: (await loadFollowupCalendar(admin, organizationId)).timezone, pending: simulatedReturn, simulated: true }),
       schedule: async input => {
         const at = resolveReturnTime(input);
         simulatedReturn = { id: 'simulated-return', scheduled_for: at, scheduled_timezone: input.timezone, bot_id: agent.tools?.scheduled_return_bot_id ?? '' };
@@ -240,7 +241,7 @@ async function testAgentReplyWithUsage(
     // No real delivery: the server retains receipts even if an API client omits history.
     sendMedia: async media => {
       const key = normalizeKeyword(media.name);
-      if (sentMedia.has(key) || mediaQueued.has(key)) return { ok: false, error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
+      if (sentMedia.has(key) || mediaQueued.has(key)) return { ok: false, alreadyDelivered: sentMedia.has(key), error: `mídia "${media.name}" já enviada neste atendimento; não envie de novo` };
       if (mediaScope) {
         const receipt = await reserveTestMedia(admin, mediaScope, media);
         if (!receipt) return { ok: false, error: `mídia "${media.name}" já enviada nesta simulação; não envie de novo` };
@@ -260,7 +261,7 @@ async function testAgentReplyWithUsage(
 
   let generated: GeneratedReply | null = null;
   try {
-    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime });
+    const gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, inboundReturn: input.messages.at(-1)?.role === 'user' });
     assertUsageHealthy();
     generated = gen;
     if (gen.outputSafety.status === 'blocked') throw new Error('Resposta da IA bloqueada por conter dados internos. Revise o roteiro e tente novamente.');

@@ -10,15 +10,15 @@
  *      do negócio em {{campos.chave}}.
  *
  * A resolução das variáveis de IA é tolerante: se a chamada falhar, os nomes
- * caem no exemplo cadastrado (ou vazio) e o erro fica no registro da execução,
- * sem derrubar a esteira de ações.
+ * de cadastro ficam vazios para consulta à ficha do cliente. Os outros usam o
+ * exemplo cadastrado (ou vazio). O erro fica no registro da execução.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateText } from 'ai';
 import { buildHistoryMessages, buildPromptVars, type ConversationContext } from './context';
 import { errorMessage } from './errors';
 import { resolveAgentModel, supportsTemperature } from './model';
-import { extractAiVarNames, renderAiVars, renderTemplate } from './template';
+import { AI_VAR_PATTERN, extractAiVarNames, renderAiVars, renderTemplate } from './template';
 import type { AgentAiVar, AgentRow, EndAction } from './types';
 
 /** Campos de texto de uma ação que aceitam variáveis. */
@@ -79,8 +79,8 @@ function pickAiVars(agent: AgentRow, names: string[]): AgentAiVar[] {
 
 /**
  * Gera os valores das variáveis de IA usadas nas ações, numa chamada só.
- * Devolve nome -> valor (nomes sem cadastro ou não devolvidos caem no exemplo
- * ou em ''); em erro, todos caem no exemplo/'' e o evento registra o motivo.
+ * Devolve nome -> valor. Quando falta um valor para atualizar o lead, deixa-o
+ * vazio para a recuperação de um dado real. Os outros usos mantêm o exemplo.
  */
 export async function resolveAiVarValues(
   admin: SupabaseClient,
@@ -97,7 +97,9 @@ export async function resolveAiVarValues(
 
   const fallback: Record<string, string> = {};
   const vars = pickAiVars(agent, names);
-  for (const n of names) fallback[n] = vars.find(v => v.name.toLowerCase() === n)?.example ?? '';
+  const leadVariables = new Set(extractAiVarNames(actions.filter(a => a.type === 'update_lead').flatMap(actionTextFields).join('\n')));
+  // Um exemplo de configuração não é um dado do cliente para gravar no cadastro.
+  for (const n of names) fallback[n] = leadVariables.has(n) ? '' : vars.find(v => v.name.toLowerCase() === n)?.example ?? '';
   const unknown = names.filter(n => !vars.some(v => v.name.toLowerCase() === n));
   if (unknown.length > 0) pushEvent('ai_vars_desconhecidas', { nomes: unknown });
   if (vars.length === 0) return fallback;
@@ -106,7 +108,7 @@ export async function resolveAiVarValues(
     const { model, modelId } = await resolveAgentModel(admin, ctx.conversation.organization_id, agent, 'action_variables');
     const history = await buildHistoryMessages(admin, ctx, Math.min(agent.history_limit, 60));
     const spec = vars
-      .map(v => `- "${v.name}": ${v.instruction}${v.example ? ` (exemplo de resultado: ${JSON.stringify(v.example)})` : ''}`)
+      .map(v => `- "${v.name}": ${v.instruction}${v.example && !leadVariables.has(v.name.toLowerCase()) ? ` (exemplo de resultado: ${JSON.stringify(v.example)})` : ''}`)
       .join('\n');
     const system = [
       'Você extrai informações de uma conversa de WhatsApp entre um atendente e um cliente.',
@@ -175,7 +177,14 @@ export function resolveActionTexts(
     case 'append_description':
       return { ...action, prefix: action.prefix ? r(action.prefix).slice(0, 120) : action.prefix };
     case 'update_lead':
-      return { ...action, changes: action.changes.map(c => (c.value ? { ...c, value: r(c.value).slice(0, 4000) } : c)) };
+      return { ...action, changes: action.changes.map(c => {
+        if (!c.value) return c;
+        const value = r(c.value).slice(0, 4000);
+        const variable = !value.trim() && c.field === 'custom_field' && c.mode === 'replace'
+          ? new RegExp('^' + AI_VAR_PATTERN + '$', 'i').exec(c.value.trim())?.[1]?.toLowerCase()
+          : undefined;
+        return { ...c, value, ...(variable && { recoverVariable: variable }) };
+      }) };
     case 'create_task':
       return { ...action, title: r(action.title).slice(0, 200) };
     case 'webhook': {

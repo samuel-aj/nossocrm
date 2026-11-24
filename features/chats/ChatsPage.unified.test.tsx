@@ -5,7 +5,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ChatsPage } from './ChatsPage';
 import type { UsageBlock } from '@/lib/ai-usage/alerts';
 const fixtures = vi.hoisted(() => ({
-  phone: '+5569999926070', search: '', usageBlocksUnavailable: false,
+  phone: '+5569999926070', usageBlocksUnavailable: false, newInbound: false,
   rows: [
     { id: 'old', connection_id: 'one', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-23', last_message_preview: 'Antiga', unread_count: 2, label_ids: [], deal_id: null, usage_block: null as UsageBlock | null },
     { id: 'new', connection_id: 'two', wa_phone: '+5569999926070', contact_id: 'maks', wa_name: 'Maks', last_message_at: '2026-09-24', last_message_preview: 'Mais recente', unread_count: 3, label_ids: [], deal_id: null, usage_block: null as UsageBlock | null },
@@ -17,16 +17,19 @@ vi.mock('./useConversationLead', () => ({ useConversationLead: () => ({ isFetchi
 vi.mock('@/lib/query/hooks', () => ({ useOrgMembers: () => ({ data: [] }), useDeal: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }), useContact: () => ({ data: undefined, isSuccess: false }) }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { id: 'user', organization_id: 'org' } }) }));
 vi.mock('@/context/ToastContext', () => ({ useToast: () => ({ addToast: vi.fn() }) }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams(fixtures.search) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams(window.location.search) }));
 vi.mock('@/features/whatsapp/DealWhatsAppChat', () => ({ DealWhatsAppChat: (props: { connectionId: string | null; initialSenderId?: string; contextConnectionId?: string; onSenderChange: (id: string) => void }) => <div data-testid="chat" data-connection={props.connectionId || 'all'} data-sender={props.initialSenderId} data-context={props.contextConnectionId}><button onClick={() => props.onSenderChange('one')}>Trocar remetente</button></div> }));
 let client: QueryClient;
 const network = vi.fn(async (url: string) => {
   if (url.includes('/connection') && !url.includes('/conversations')) return Response.json({ connected: true, connections: [{ id: 'one', phoneNumber: '+5511111111111', status: 'connected' }, { id: 'two', phoneNumber: '+5522222222222', status: 'connected' }] });
-  if (url.includes('/conversations')) return Response.json({ data: url.includes('connectionId=one') ? fixtures.rows.slice(0, 1) : fixtures.rows, groupsEnabled: true, usageBlocksUnavailable: fixtures.usageBlocksUnavailable });
+  if (url.includes('/conversations')) {
+    const rows = fixtures.newInbound ? [...fixtures.rows, { ...fixtures.rows[1], id: 'pending', wa_phone: '+5569999900010', contact_id: null, wa_name: 'Contato novo' }] : fixtures.rows;
+    return Response.json({ data: url.includes('connectionId=one') ? rows.filter(row => row.connection_id === 'one') : rows, groupsEnabled: true, usageBlocksUnavailable: fixtures.usageBlocksUnavailable });
+  }
   return Response.json({ labels: [] });
 });
 function mount() { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); render(<QueryClientProvider client={client}><ChatsPage /></QueryClientProvider>); }
-beforeEach(() => { fixtures.search = ''; fixtures.usageBlocksUnavailable = false; fixtures.rows.forEach(row => { row.usage_block = null; }); sessionStorage.clear(); vi.stubGlobal('fetch', network); network.mockClear(); });
+beforeEach(() => { window.history.replaceState({}, '', '/chats'); fixtures.usageBlocksUnavailable = false; fixtures.newInbound = false; fixtures.rows.forEach(row => { row.usage_block = null; }); sessionStorage.clear(); vi.stubGlobal('fetch', network); network.mockClear(); });
 afterEach(() => { cleanup(); client?.clear(); vi.unstubAllGlobals(); });
 
 it('shows one row, the latest preview, combined unread count and both sending numbers', async () => {
@@ -46,9 +49,18 @@ it('keeps an explicit number filter pinned to that number', async () => {
   expect(screen.getByTestId('chat')).toHaveAttribute('data-connection', 'one');
 });
 it('opens a deep link to an older conversation in the same unified row with its sender selected', async () => {
-  fixtures.search = 'conversation=old'; mount();
+  window.history.replaceState({}, '', '/chats?conversation=old'); mount();
   expect(await screen.findByTestId('chat')).toHaveAttribute('data-connection', 'all');
   expect(screen.getByTestId('chat')).toHaveAttribute('data-sender', 'one');
+});
+it('opens a bell link to an unassigned conversation on another line while a sidebar search is active', async () => {
+  sessionStorage.setItem('wa-chats-connection', 'one');
+  fixtures.newInbound = true;
+  mount();
+  await screen.findByRole('button', { name: /Maks.*Antiga/ });
+  window.history.replaceState({}, '', '/chats?conversation=pending');
+  fireEvent.change(screen.getByPlaceholderText('Pesquisar contato ou conversa...'), { target: { value: 'Maks' } });
+  expect(await screen.findByTestId('chat')).toHaveAttribute('data-sender', 'two');
 });
 it('marks the complete unified conversation as read using the phone, never the group-only endpoint', async () => {
   mount(); await screen.findByRole('button', { name: /Maks.*Mais recente/ });

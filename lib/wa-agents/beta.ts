@@ -10,19 +10,22 @@
  * A chave antiga `wa_agents_beta` continua sendo lida como equivalente para
  * não derrubar quem já estava usando antes da migração.
  */
+import { dbFailure } from './errors';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { WA_AGENTS_BETA_FLAG, WA_AI_AGENTS_FLAG } from './types';
 
-async function flagEnabled(admin: SupabaseClient, organizationId: string, key: string): Promise<boolean> {
+async function flagEnabled(admin: SupabaseClient, organizationId: string, key: string, strict: boolean): Promise<boolean> {
   try {
-    const { data } = await admin
+    const { data, error } = await admin
       .from('ai_feature_flags')
       .select('enabled')
       .eq('organization_id', organizationId)
       .eq('key', key)
       .maybeSingle();
+    if (error) throw dbFailure(error);
     return (data as { enabled?: boolean } | null)?.enabled === true;
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return false;
   }
 }
@@ -31,9 +34,9 @@ async function flagEnabled(admin: SupabaseClient, organizationId: string, key: s
  * true quando a organização pode usar o AGENTE DE IA. Padrão: false.
  * Aceita a chave nova ou a antiga da beta (organizações que já usavam).
  */
-export async function isAiAgentsApproved(admin: SupabaseClient, organizationId: string): Promise<boolean> {
-  if (await flagEnabled(admin, organizationId, WA_AI_AGENTS_FLAG)) return true;
-  return flagEnabled(admin, organizationId, WA_AGENTS_BETA_FLAG);
+export async function isAiAgentsApproved(admin: SupabaseClient, organizationId: string, strict = false): Promise<boolean> {
+  if (await flagEnabled(admin, organizationId, WA_AI_AGENTS_FLAG, strict)) return true;
+  return flagEnabled(admin, organizationId, WA_AGENTS_BETA_FLAG, strict);
 }
 
 /**

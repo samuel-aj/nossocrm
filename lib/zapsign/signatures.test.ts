@@ -677,9 +677,10 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(prepared.solicitar_confirmacao).toContain('Felipe da Silva · Telefone: +5511988887777 · E-mail: não informado');
     db.tables.wa_messages.push(msg('2', 'out', prepared.solicitar_confirmacao, 1), msg('3', 'in', 'Sim', 2));
     const approved = { ...scope, inboundId: '3' };
-    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: { telefone_signatario: '+551188887777' } })).toMatchObject({ criado: false });
-    expect(db.post).not.toHaveBeenCalled();
-    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: {} })).toMatchObject({ criado: true });
+    // The agent copies the outdated WhatsApp profile on the second call. Only
+    // the number in the review the customer actually accepted may be sent.
+    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: { telefone_signatario: '+551188887777' } })).toMatchObject({ criado: true });
+    expect(db.post).toHaveBeenCalledTimes(1);
     const request = db.post.mock.calls[0][0];
     expect(request).toMatchObject({ signer_name: 'Felipe da Silva', signer_phone_country: '55', signer_phone_number: '11988887777',
       data: [{ de: '{{NOME COMPLETO}}', para: 'Felipe da Silva' }, { de: '{{TELEFONE}}', para: '+5511988887777' }, { de: '{{E-MAIL}}', para: ' ' }] });
@@ -687,6 +688,69 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
     expect(db.tables.deal_signatures[0].request).toMatchObject({ recipient: '+551188887777',
       agent_signer: { name: 'Felipe da Silva', phone: '+5511988887777', email: '' } });
     expect(db.tables.contacts[0].email).toBe('antigo@example.org');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(h.texts).toEqual([]);
+  });
+  it('usa o WhatsApp apresentado e confirmado mesmo se a IA omitir ou digitar outro número ao criar', async () => {
+    const db = setup();
+    db.tables.contacts[0].phone = null;
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['WHATSAPP'] });
+    const phone = '(67) 99876-5432';
+    db.tables.wa_messages[0].body = 'Meu WhatsApp é ' + phone;
+    const prepared = await runAgentContract(db.admin, scope, { modo: 'preparar', dados: { WHATSAPP: phone } }, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in prepared) || !prepared.solicitar_confirmacao) throw new Error('Faltou a ficha');
+    const shown = prepared.solicitar_confirmacao.replace('Telefone: +5567998765432', 'WhatsApp com DDD: ' + phone);
+    db.tables.wa_messages.push(msg('2', 'out', shown, 1), msg('3', 'in', 'Está tudo certo', 2));
+    const approved = { ...scope, inboundId: '3' };
+    expect(await runAgentContract(db.admin, approved, { modo: 'preparar', dados: {} })).toMatchObject({ ficha_confirmada: true });
+    expect(await runAgentContract(db.admin, approved, { modo: 'criar', dados: { telefone_signatario: '(67) 99876-5433' } }))
+      .toMatchObject({ criado: true });
+    expect(db.post.mock.calls[0][0]).toMatchObject({ signer_phone_country: '55', signer_phone_number: '67998765432',
+      data: [{ de: '{{WHATSAPP}}', para: '+5567998765432' }] });
+    expect(h.texts).toEqual([]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('não emite com dois telefones divergentes na ficha, com correção do cliente ou aceite vencido', async () => {
+    const db = setup(), approved = await db.accept();
+    const summary = db.tables.wa_messages[1], answer = db.tables.wa_messages[2];
+    const original = summary.body;
+    summary.body = original.replace(' · E-mail:', ' · WhatsApp: (11) 91234-5678 · E-mail:');
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ perguntar_ao_cliente: ['Telefone com DDD de quem vai assinar'] });
+    summary.body = original.replace('+5511988887777', '+551198888');
+    expect(await runAgentContract(db.admin, approved, create)).toMatchObject({ perguntar_ao_cliente: ['Telefone com DDD de quem vai assinar'] });
+    summary.body = original;
+    answer.body = 'Sim, mas meu telefone mudou para (11) 91234-5678';
+    expect(await runAgentContract(db.admin, approved, create)).not.toMatchObject({ criado: true });
+    answer.body = 'Sim';
+    for (const m of db.tables.wa_messages) m.created_at = new Date(Date.parse(m.created_at) - 86_401_000).toISOString();
+    expect(await runAgentContract(db.admin, approved, create)).not.toMatchObject({ criado: true });
+    expect(db.post).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(h.texts).toEqual([]);
+  });
+  it.each(['(67) 99876-5433', '679987654322'])('reconstitui os cinco campos em mensagens separadas quando a IA altera TELEFONE para %s', async mistyped => {
+    const db = setup();
+    const dados = { CPF: '529.982.247-25', 'E-MAIL': 'pessoa@example.org', TELEFONE: '(67) 99876-5432',
+      'NOME COMPLETO': 'Pessoa de Teste', 'ENDEREÇO COMPLETO': 'Rua das Acácias, 98, Vila Nova, Campo Grande MS' };
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: Object.keys(dados) });
+    db.tables.contacts[0].phone = null;
+    db.tables.wa_messages[0].body = Object.entries(dados).map(([key, value]) => key + ': ' + value).join('\n');
+    const result = await runAgentContract(db.admin, scope, { modo: 'preparar', dados }, key => {
+      db.tables.wa_conversations[0].ai_state = { zapsign_review: key };
+    });
+    if (!('solicitar_confirmacao' in result) || !result.solicitar_confirmacao) throw new Error('Esperava os dados para conferência');
+    const lines = result.solicitar_confirmacao.replace('Telefone: +5567998765432', 'Telefone: ' + dados.TELEFONE).split(/ · |\n\n/);
+    expect(lines).toHaveLength(6);
+    db.tables.wa_messages.push(...lines.map((line, i) => msg('campo-' + i, 'out', line, i + 1)),
+      msg('aceite', 'in', 'Sim', lines.length + 1));
+    const accepted = { ...scope, inboundId: 'aceite' };
+    expect(await runAgentContract(db.admin, accepted, { modo: 'preparar', dados })).toMatchObject({ ficha_confirmada: true });
+    expect(await runAgentContract(db.admin, accepted, { modo: 'criar', dados: { ...dados, TELEFONE: mistyped } }))
+      .toMatchObject({ criado: true });
+    expect(db.post.mock.calls[0][0]).toMatchObject({ signer_phone_country: '55', signer_phone_number: '67998765432',
+      data: expect.arrayContaining([{ de: '{{TELEFONE}}', para: '+5567998765432' }]) });
     expect(fetch).not.toHaveBeenCalled();
     expect(h.texts).toEqual([]);
   });
@@ -1079,6 +1143,24 @@ describe('criação pelo agente com ZapSign e conversa simuladas', () => {
       .toMatchObject({ simulado: true, criado: true });
     expect(db.post).not.toHaveBeenCalled(); expect(db.tables.deal_signatures).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled(); expect(h.texts).toEqual([]);
+  });
+  it('no simulador preserva o celular confirmado mesmo quando a IA repete o telefone do representante', async () => {
+    const db = setup();
+    vi.mocked(files.readContractTemplate).mockResolvedValue({ revision: 'r1', names: ['Telefone com DDD'] });
+    const chat: Parameters<typeof simulateAgentContract>[3] = [{ role: 'user', text: 'Meu celular é (67) 99876-5432.' }];
+    let key: string | undefined;
+    const initial = await simulateAgentContract(db.admin, ORG, 'tpl-1', chat,
+      { modo: 'preparar', dados: { telefone_signatario: '(67) 99876-5432' } }, undefined, k => { key = k; });
+    if (!initial.solicitar_confirmacao) throw new Error('Faltou a ficha de teste');
+    const shown = initial.solicitar_confirmacao.replace('Telefone:', 'Telefone do representante: (67) 98765-4321 · Celular do signatário:');
+    const result = await simulateAgentContract(db.admin, ORG, 'tpl-1',
+      [...chat, { role: 'assistant', text: shown, contractReviewKey: key }, { role: 'user', text: 'Pode gerar' }],
+      { modo: 'criar', dados: { telefone_signatario: '(67) 98765-4321' } });
+    expect(result).toMatchObject({ simulado: true, criado: true });
+    expect(db.post).not.toHaveBeenCalled();
+    expect(db.tables.deal_signatures).toHaveLength(0);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(h.texts).toEqual([]);
   });
 
   describe('correção parcial do endereço depois da ficha', () => {

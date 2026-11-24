@@ -77,21 +77,22 @@ export type LeadChangeOutcome = { changed: string[]; problems: string[] };
  */
 export async function applyLeadChanges(
   admin: SupabaseClient,
-  input: { organizationId: string; dealId: string; changes: LeadChange[]; render: (text: string) => string }
+  input: { organizationId: string; dealId: string; changes: LeadChange[]; render: (text: string) => string; recoverValue?: (variable: string) => string | undefined },
+  retryOnConflict = true
 ): Promise<LeadChangeOutcome> {
   const { organizationId, dealId } = input;
   const { data: row, error: readError } = await admin
     .from('deals')
-    .select('title, description, custom_fields')
+    .select('title, description, custom_fields, updated_at')
     .eq('organization_id', organizationId)
     .eq('id', dealId)
     .maybeSingle();
   if (readError) throw new Error(readError.message);
   if (!row) throw new Error('lead não encontrado');
-  const current = row as { title: string | null; description: string | null; custom_fields: Record<string, unknown> | null };
+  const current = row as { title: string | null; description: string | null; custom_fields: Record<string, unknown> | null; updated_at: string | null };
   const needsDefs = input.changes.some(c => c.field === 'custom_field');
   const defs = needsDefs ? await loadCustomFieldDefs(admin, organizationId) : [];
-  const patch = buildLeadPatch(input.changes, { render: input.render, current, defs });
+  const patch = buildLeadPatch(input.changes, { render: input.render, recoverValue: input.recoverValue, current, defs });
 
   if (typeof patch.columns.owner_id === 'string' && !(await ownerInOrg(admin, organizationId, patch.columns.owner_id))) {
     patch.problems.push('responsável não pertence à organização');
@@ -110,12 +111,25 @@ export async function applyLeadChanges(
     updates.custom_fields = base;
   }
   if (Object.keys(updates).length > 0) {
-    const { error } = await admin
+    const query = admin
       .from('deals')
       .update({ ...updates, updated_at: nowIso() })
       .eq('organization_id', organizationId)
       .eq('id', dealId);
-    if (error) throw new Error(error.message);
+    if (input.recoverValue && updates.custom_fields) {
+      // Someone can finish the same ficha while the agent is reading it. Never
+      // replace the current JSON with the one read before their edit.
+      const guarded = current.updated_at ? query.eq('updated_at', current.updated_at) : query.is('updated_at', null);
+      const { data, error } = await guarded.select('id').maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) {
+        if (retryOnConflict) return applyLeadChanges(admin, input, false);
+        throw new Error('A ficha foi editada durante a atualização. Os dados atuais foram preservados.');
+      }
+    } else {
+      const { error } = await query;
+      if (error) throw new Error(error.message);
+    }
   }
   return { changed, problems: patch.problems };
 }
