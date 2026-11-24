@@ -1,5 +1,4 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -53,12 +52,5 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
 
   if (error) return json({ error: safeErrorMessage(error) }, 500);
 
-  await logSecurityEvent({
-    action: 'team.invite.revoked',
-    actorId: user.id,
-    organizationId: scoped.organization_id,
-    resourceType: 'invite',
-    resourceId: id,
-  }, req);
   return json({ ok: true });
 }

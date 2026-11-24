@@ -97,7 +97,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     resource_type: 'organization',
     resource_id: id,
     details: { fields_updated: Object.keys(updates).filter(k => k !== 'updated_at') },
-  }, req);
+  });
 
   return json({ ok: true });
 }
@@ -134,7 +134,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }
     resource_type: 'organization',
     resource_id: id,
     severity: 'critical',
-  }, req);
+  });
 
   return json({ ok: true });
 }

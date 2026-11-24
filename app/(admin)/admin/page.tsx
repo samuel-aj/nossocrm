@@ -7,7 +7,6 @@ import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { UserRole } from '@/types/constants'
 import { pinTabOrg } from '@/lib/tabOrg'
-import { SecurityEventsPanel } from '@/features/security/SecurityEventsPanel'
 import {
   Building2,
   Plus,
@@ -1034,8 +1033,6 @@ export default function AdminPage() {
             </div>
           ))}
         </div>
-
-        <SecurityEventsPanel organizations={organizations.map(o => ({ id: o.id, name: o.name }))} />
       </main>
     </div>
   )

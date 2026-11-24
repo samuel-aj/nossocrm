@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -194,25 +193,6 @@ export async function POST(req: Request) {
   if (upsertError) {
     return json({ error: safeErrorMessage(upsertError) }, 500);
   }
-
-  const chavesAlteradas = [
-    googleKey !== undefined ? 'google' : null,
-    openaiKey !== undefined ? 'openai' : null,
-    anthropicKey !== undefined ? 'anthropic' : null,
-  ].filter(Boolean);
-  await logSecurityEvent({
-    action: 'ai.settings.changed',
-    actorId: user.id,
-    organizationId: scoped.organization_id,
-    resourceType: 'organization_settings',
-    details: {
-      enabled: updates.aiEnabled ?? null,
-      provider: updates.aiProvider ?? null,
-      model: updates.aiModel ?? null,
-      chaves_alteradas: chavesAlteradas,
-    },
-    severity: chavesAlteradas.length ? 'warning' : 'info',
-  }, req);
 
   return json({ ok: true });
 }

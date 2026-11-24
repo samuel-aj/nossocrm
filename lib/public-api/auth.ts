@@ -1,17 +1,8 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
-import { logSecurityEvent, requestMeta, shouldLogThrottled } from '@/lib/security/auditLog';
 
 export type PublicApiAuthResult =
   | { ok: true; organizationId: string; organizationName: string; apiKeyId: string; apiKeyPrefix: string }
   | { ok: false; status: number; body: { error: string; code?: string } };
-
-function safePath(url: string): string {
-  try {
-    return new URL(url).pathname.slice(0, 200);
-  } catch {
-    return '';
-  }
-}
 
 function getAnonSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -51,20 +42,6 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     typeof row.api_key_id !== 'string' ||
     typeof row.api_key_prefix !== 'string'
   ) {
-    // Chave que não existe (ou revogada): fica registrado, no máximo uma vez
-    // por minuto por IP, para não virar porta de sobrecarga do banco. Falha do
-    // próprio banco (error) não é tentativa indevida e não é registrada.
-    if (!error) {
-      const { ip } = requestMeta(request);
-      if (shouldLogThrottled(`public_api.invalid_key:${ip ?? 'sem-ip'}`)) {
-        await logSecurityEvent({
-          action: 'public_api.invalid_key',
-          resourceType: 'api_key',
-          details: { path: safePath(request.url), tamanho: token.length },
-          severity: 'warning',
-        }, request);
-      }
-    }
     return { ok: false, status: 401, body: { error: 'Invalid API key', code: 'AUTH_INVALID' } };
   }
 

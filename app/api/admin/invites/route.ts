@@ -1,5 +1,4 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
@@ -184,15 +183,6 @@ export async function POST(req: Request) {
           role: parsed.data.role,
           appUrl: origin,
         });
-        await logSecurityEvent({
-          action: 'team.member.added',
-          actorId: user.id,
-          organizationId: scoped.organization_id,
-          resourceType: 'user',
-          resourceId: existingAuthUser.id,
-          details: { email, role: parsed.data.role, via: 'conta já existente' },
-          severity: parsed.data.role === UserRole.ADMIN ? 'warning' : 'info',
-        }, req);
         return json({ addedExisting: true, emailSent, member: { id: existingAuthUser.id, email } }, 201);
       }
       staleAuthUserId = existingAuthUser.id;
@@ -249,14 +239,5 @@ export async function POST(req: Request) {
 
   // Sem o token: quem lê o log da Vercel não pode usar o convite.
   console.log('[admin/invites POST] Created invite:', { id: invite?.id, expires_at: invite?.expires_at, emailSent });
-  await logSecurityEvent({
-    action: 'team.invite.created',
-    actorId: user.id,
-    organizationId: scoped.organization_id,
-    resourceType: 'invite',
-    resourceId: invite?.id,
-    details: { email: email ?? null, role: parsed.data.role, expires_at: invite?.expires_at ?? null, emailSent },
-    severity: parsed.data.role === UserRole.ADMIN ? 'warning' : 'info',
-  }, req);
   return json({ invite, emailSent, emailError }, 201);
 }

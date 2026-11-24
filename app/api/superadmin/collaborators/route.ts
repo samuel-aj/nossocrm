@@ -136,7 +136,7 @@ export async function POST(req: Request) {
     resource_id: targetProfile.id,
     details: { email: targetProfile.email, previous_role: targetProfile.role },
     severity: 'critical',
-  }, req);
+  });
 
   return json({
     ok: true,
@@ -183,7 +183,7 @@ export async function DELETE(req: Request) {
     resource_type: 'user',
     resource_id: userId,
     severity: 'critical',
-  }, req);
+  });
 
   return json({ ok: true });
 }

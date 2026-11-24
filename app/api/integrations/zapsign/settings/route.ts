@@ -8,7 +8,6 @@
  * O token nunca volta inteiro para o navegador.
  */
 import { z } from 'zod';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { json } from '@/lib/whatsapp/api';
 import { guardRoute, readJsonBody, validationError, getErrorMessage, type GuardResult } from '@/app/api/wa-agents/_shared';
 import { clientFor, loadZapSignSettings, newWebhookSecret } from '@/lib/zapsign/signatures';
@@ -159,14 +158,6 @@ export async function PUT(req: Request) {
       if (/zapsign_settings/.test(error.message)) return json({ error: 'A integração com a ZapSign ainda não foi instalada no banco. Fale com o suporte.' }, 503);
       return json({ error: connectionFailureMessage(stage, reference), reference }, 500);
     }
-    await logSecurityEvent({
-      action: 'integration.zapsign.changed',
-      actorId: auth.user.id,
-      organizationId: orgId,
-      resourceType: 'integration',
-      details: { connected: true, sandbox: input.sandbox, webhook_ok: !!webhookId },
-      severity: 'warning',
-    }, req, auth.admin);
     return json({
       connected: true,
       sandbox: input.sandbox,
@@ -196,13 +187,5 @@ export async function DELETE(req: Request) {
     }
   }
   await auth.admin.from('zapsign_settings').delete().eq('organization_id', orgId);
-  await logSecurityEvent({
-    action: 'integration.zapsign.changed',
-    actorId: auth.user.id,
-    organizationId: orgId,
-    resourceType: 'integration',
-    details: { connected: false },
-    severity: 'warning',
-  }, req, auth.admin);
   return json({ connected: false });
 }

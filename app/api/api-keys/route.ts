@@ -11,7 +11,6 @@
  * client — nenhuma organização enxerga credenciais de outra.
  */
 import { NextResponse } from 'next/server';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -58,14 +57,5 @@ export async function POST(req: Request) {
     .select(API_KEY_COLUMNS)
     .single();
   if (error) return NextResponse.json({ error: safeErrorMessage(error) }, { status: 500 });
-  await logSecurityEvent({
-    action: 'api_key.created',
-    actorId: auth.userId,
-    organizationId: auth.organizationId,
-    resourceType: 'api_key',
-    resourceId: (data as { id?: string } | null)?.id,
-    details: { name, prefixo: prefix },
-    severity: 'warning',
-  }, req);
   return NextResponse.json({ data: { ...data, token } }, { status: 201 });
 }

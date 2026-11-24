@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
@@ -168,15 +167,6 @@ export async function GET(req: Request) {
 
     const today = new Date().toISOString().slice(0, 10);
     const filename = `contatos-${today}.csv`;
-
-    await logSecurityEvent({
-      action: 'data.contacts.exported',
-      actorId: user.id,
-      organizationId: scoped.organization_id,
-      resourceType: 'contacts',
-      details: { total: allContacts.length },
-      severity: allContacts.length >= 500 ? 'warning' : 'info',
-    }, req);
 
     return new NextResponse(csv, {
       status: 200,
