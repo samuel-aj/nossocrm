@@ -77,6 +77,10 @@ class ProactiveInterrupted extends Error {
   constructor(message: string, readonly until?: string) { super(message); }
 }
 
+class InboundRecoveryUncertain extends Error {
+  constructor() { super('Possível envio após a mensagem recebida. Conferir o atendimento antes de responder.'); }
+}
+
 /** Only this suffix was explicitly refused by the provider. An ambiguous
  * timeout or absent acknowledgement must never create a retry. */
 class DisconnectedText extends WaAgentError {
@@ -96,6 +100,7 @@ export type RunResult = {
 export type InboundIngressStep = 'bots' | 'started' | 'message_received';
 export type InboundDelivery = {
   completedSteps: readonly string[];
+  recoverOnlyIfUnanswered?: boolean;
   beginStep(step: InboundIngressStep | 'dispatch'): Promise<void>;
   finishStep(step: InboundIngressStep): Promise<void>;
 };
@@ -104,6 +109,7 @@ export type InboundResult = RunResult & { disposition: 'done' | 'retry' | 'atten
 export type RunAgentInput = {
   /** Fence the durable claim before any model, tool or outbound attempt. */
   beginInboundDispatch?: () => Promise<void>;
+  recoverOnlyIfUnanswered?: boolean;
   organizationId: string;
   conversationId: string;
   trigger: RunTrigger;
@@ -740,15 +746,31 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       const lastIn = await getLastMessage(admin, ctx!, 'in');
       if (!lastIn) throw new WaAgentError('INBOUND_PENDING', 'Entrada ainda não disponível.');
       if (lastIn.id !== inboundAnchor) throw new ProactiveInterrupted('superseded');
-      const human = await admin.from('wa_messages').select('id')
-        .eq('organization_id', organizationId).eq('conversation_id', conversationId).eq('direction', 'out')
-        .is('deleted_at', null).neq('status', 'failed')
-        .gte('created_at', lastIn.created_at).or('source.is.null,source.not.in.(agent,api,bot)').limit(1);
-      if (human.error) throw dbFailure(human.error);
-      if (human.data?.length) throw new ProactiveInterrupted('atendente respondeu por último');
       if (checkBudget) {
         const budget = await checkConversationBudget(admin, organizationId, conversationId);
         if (budget.blocked_at) throw new ProactiveInterrupted('IA pausada por consumo.');
+      }
+      const outbound = admin.from('wa_messages').select('id, source, status')
+        .eq('organization_id', organizationId).eq('conversation_id', conversationId).eq('direction', 'out')
+        .gte('created_at', lastIn.created_at);
+      if (input.recoverOnlyIfUnanswered) {
+        // A delivery by any other sender during generation makes an incident replay uncertain.
+        // Only receipts from earlier segments of this same reply belong to us.
+        if (missingReceipt) throw new InboundRecoveryUncertain();
+        if (sentIds.length) outbound.not('id', 'in', `(${sentIds.join(',')})`);
+        const { data, error: readError } = await outbound.limit(1);
+        if (readError) throw dbFailure(readError);
+        if (data?.length) {
+          if (data[0].source === 'crm' && ['sent', 'delivered', 'read'].includes(data[0].status)) {
+            throw new ProactiveInterrupted('atendente respondeu por último');
+          }
+          throw new InboundRecoveryUncertain();
+        }
+      } else {
+        const human = await outbound.is('deleted_at', null).neq('status', 'failed')
+          .or('source.is.null,source.not.in.(agent,api,bot)').limit(1);
+        if (human.error) throw dbFailure(human.error);
+        if (human.data?.length) throw new ProactiveInterrupted('atendente respondeu por último');
       }
     };
     // Identity resolution already checked the balance; the model and every send revalidate it.
@@ -1015,6 +1037,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     outputText = text || null;
     pushEvent('output_checked', { ...gen.outputSafety });
     if (gen.outputSafety.status === 'blocked') {
+      if (input.recoverOnlyIfUnanswered) await checkInbound();
       // A pause/transfer performed by a person while the model was running wins.
       const pause = {
         ai_status: 'paused', ai_status_changed_at: new Date().toISOString(), ai_resume_at: null,
@@ -1127,8 +1150,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
             await beforeProactiveSend();
             const sent = await sendOutboxMedia(admin, ctx, {
               mediaPath: file.path, kind: 'audio', mime: 'audio/mpeg', fileName: 'voz.mp3', transcript: t,
+              beforeDispatch: input.recoverOnlyIfUnanswered ? beforeProactiveSend : undefined,
             });
-            if (!sent.ok) throw new WaAgentError(sent.disconnectRejected ? 'DISCONNECTED' : 'SEND_FAILED', sent.error);
+            if (!sent.ok) {
+              if (input.recoverOnlyIfUnanswered) await checkInbound(false);
+              throw new WaAgentError(sent.disconnectRejected ? 'DISCONNECTED' : 'SEND_FAILED', sent.error);
+            }
             if (sent.skipped) {
               pushEvent('media_duplicate_blocked', { media_path: file.path });
               continue;
@@ -1188,6 +1215,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
         mediaSent.push(media.name);
         pushEvent('media_sent', { nome: media.name, kind: media.kind, message_id: sent.messageId });
       } else {
+        if (input.recoverOnlyIfUnanswered) await checkInbound(false);
         if (sent.disconnectRejected) throw new WaAgentError('DISCONNECTED', sent.error);
         if (!sent.retryable) effectfulTool = true;
         // O texto já foi: a falha da mídia fica registrada (e a mensagem 'failed' aparece no chat)
@@ -1414,6 +1442,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     return res;
   } catch (e) {
     const msg = errorMessage(e);
+    if (e instanceof InboundRecoveryUncertain) return await finish('error', { reason: msg, error: msg });
     if (e instanceof ProactiveInterrupted) return {
       ...await finish('skipped', { reason: msg }),
       ...(!proactiveSent && e.until ? { deferredUntil: e.until } : {}),
@@ -1690,6 +1719,7 @@ async function processInboundMessage(
       agentId: agent.id,
       triggerMessageId: messageId,
       beginInboundDispatch: input.delivery ? () => begin('dispatch') : undefined,
+      recoverOnlyIfUnanswered: input.delivery?.recoverOnlyIfUnanswered,
     });
   } catch (e) {
     const msg = errorMessage(e);

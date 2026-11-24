@@ -6,7 +6,7 @@ import { processInboundRecovery } from './inboundRecovery';
 vi.mock('./engine', () => ({ handleInboundMessage: vi.fn() }));
 const handle = vi.mocked(handleInboundMessage);
 const key = { organization_id: 'org', conversation_id: 'conv', message_id: 'message' };
-const work = { ...key, lease_token: 'lease', completed_steps: ['bots'] };
+const work = { ...key, lease_token: 'lease', completed_steps: ['bots'], recover_only_if_unanswered: true };
 const lease = { p_message_id: work.message_id, p_lease_token: work.lease_token };
 
 function database(rows = [work]) {
@@ -34,6 +34,7 @@ describe('recuperação da entrada do WhatsApp', () => {
     const { admin, rpc } = database();
     handle.mockImplementationOnce(async ({ delivery }) => {
       expect(delivery?.completedSteps).toEqual(['bots']);
+      expect(delivery?.recoverOnlyIfUnanswered).toBe(true);
       await delivery!.beginStep('message_received');
       await delivery!.finishStep('message_received');
       await delivery!.beginStep('dispatch');

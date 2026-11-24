@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { handleInboundMessage, type InboundDelivery } from './engine';
 
 export type InboundMessageKey = { organization_id: string; conversation_id: string; message_id: string };
-type Work = InboundMessageKey & { lease_token: string; completed_steps: string[] };
+type Work = InboundMessageKey & { lease_token: string; completed_steps: string[]; recover_only_if_unanswered?: boolean };
 type Step = Parameters<InboundDelivery['beginStep']>[0];
 type Outcome = 'done' | 'cancelled' | 'retry' | 'review';
 
@@ -37,6 +37,7 @@ async function processEntry(admin: SupabaseClient, row: Work) {
       organizationId: row.organization_id, conversationId: row.conversation_id, messageId: row.message_id,
       delivery: {
         completedSteps: row.completed_steps,
+        recoverOnlyIfUnanswered: row.recover_only_if_unanswered === true,
         beginStep: step => advance(step, false),
         finishStep: step => advance(step, true),
       },

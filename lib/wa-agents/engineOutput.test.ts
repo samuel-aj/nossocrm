@@ -82,7 +82,11 @@ function fakeDb() {
         neq: (k: string, v: unknown) => { rows = rows.filter(r => r[k] !== v); return q; },
         is: (k: string, v: unknown) => { rows = rows.filter(r => v === null ? r[k] == null : r[k] === v); return q; },
         in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
-        gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q, not: () => q,
+        gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q,
+        not: (k: string, op: string, v: string) => {
+          if (op === 'in') rows = rows.filter(r => !v.slice(1,-1).split(',').includes(String(r[k])));
+          return q;
+        },
         gte: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) >= v); return q; },
         or: (filter: string) => {
           if (filter === 'source.is.null,source.not.in.(agent,api,bot)') {
@@ -198,6 +202,39 @@ describe('recuperação durável de entrada com transporte falso', () => {
       .toMatchObject({ disposition: 'done', reason: 'atendente respondeu por último' });
     expect(h.send).not.toHaveBeenCalled();
     expect(h.action).not.toHaveBeenCalled();
+  });
+
+  it.each(['bot', 'api', 'agent', 'echo'])('encaminha a recuperação para revisão se houver saída concorrente de %s', async source => {
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'parallel', direction: 'out', source, status: 'sent' });
+      return draft('Resposta preparada.', false);
+    });
+    const result = await handleInboundMessage({ ...key, delivery: { ...claim(['bots']), recoverOnlyIfUnanswered: true } });
+    expect(result).toMatchObject({ status: 'error', disposition: 'attention', reason: expect.stringContaining('Possível envio') });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.action).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('avalia envios entre segmentos sem confundir o próprio recibo (resposta concorrente: %s)', async competing => {
+    h.agent!.line_delay_ms = 0;
+    h.generate.mockResolvedValueOnce(draft('Primeira parte.\nSegunda parte.', false));
+    h.send.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'receipt', direction: 'out', source: 'agent', status: 'sent' });
+      if (competing) h.messages.push({ ...incoming, id: 'parallel', direction: 'out', source: 'api', status: 'pending' });
+      return { ok: true, providerMessageId: 'first' };
+    });
+    const result = await handleInboundMessage({ ...key, delivery: { ...claim(['bots']), recoverOnlyIfUnanswered: true } });
+    expect(result.disposition).toBe(competing ? 'attention' : 'done');
+    expect(h.send).toHaveBeenCalledTimes(competing ? 1 : 2);
+  });
+
+  it('mantém o fluxo imediato quando o robô dispara junto com a entrada normal', async () => {
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'bot-step', direction: 'out', source: 'bot', status: 'sent' });
+      return draft('Posso ajudar?', false);
+    });
+    expect(await handleInboundMessage({ ...key, delivery: claim(['bots']) })).toMatchObject({ disposition: 'done', status: 'ok' });
+    expect(h.send).toHaveBeenCalledOnce();
   });
 
   it('não move o cursor da recepção para uma nova entrada que chegou durante o modelo do pipeline', async () => {
