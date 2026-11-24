@@ -19,7 +19,7 @@ import { SAVED_DATA_KEY_MAX_CHARS, SAVED_DATA_MAX_KEYS, SAVED_DATA_VALUE_MAX_CHA
 import { normalizeKeyword } from './text';
 import type { AgentDocumentRow, AgentMediaRow, AgentRow, KnowledgeHit } from './types';
 
-export type MediaSendResult = { ok: boolean; error?: string; note?: string };
+export type MediaSendResult = { ok: boolean; error?: string; note?: string; alreadyDelivered?: boolean };
 
 export type AgentToolRuntime = {
   voiceClips?: readonly string[];
@@ -258,7 +258,8 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
         if (!item) return { ok: false, erro: `Mídia "${nome}" não encontrada` };
         try {
           const r = await send(item, legenda?.trim() || undefined);
-          return r.ok ? { ok: true, midia: item.name, mensagem: r.note ?? 'mídia enviada' } : { ok: false, erro: r.error ?? 'falha no envio' };
+          return r.ok ? { ok: true, midia: item.name, mensagem: r.note ?? 'mídia enviada' } :
+            { ok: false, erro: r.error ?? 'falha no envio', ...(r.alreadyDelivered && { ja_enviada: true }) };
         } catch (e) {
           return { ok: false, erro: errorMessage(e) };
         }

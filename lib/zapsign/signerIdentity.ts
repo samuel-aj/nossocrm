@@ -10,7 +10,7 @@ export function signerField(label: string, source?: string): SignerField | undef
   const key = normalizeVarName(label);
   if (/(?:representante|testemunha|advogad|escritorio|contratad[oa]|beneficiari[oa]|genitor|responsavel|curador|menor|(?:da|do)(?:mae|pai|filh[oa]))/.test(key)) return;
   if (/^(?:nome(?:completo)?|cliente|contratante|outorgante)(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante|titular))?$/.test(key)) return 'name';
-  if (/^(?:telefone|celular|whatsapp|fone)(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante|titular))?$/.test(key)) return 'phone';
+  if (/^(?:(?:numerod[eo])?(?:telefone(?:celular|whatsapp)?|celular|whatsapp|fone))(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante|titular))?$/.test(key.replace('comddd', ''))) return 'phone';
   if (/^email(?:(?:do|da)?(?:cliente|contratante|signatario|outorgante|titular|contato))?$/.test(key)) return 'email';
   if (source === 'contato.nome') return 'name';
   if (source === 'contato.telefone') return 'phone';
@@ -29,6 +29,7 @@ export function signerEmail(value: string) {
 export function signerPhone(value: string) {
   if (!/^[+\d\s().-]+$/.test(value)) return '';
   const phone = normalizePhoneE164(value);
+  if (phone.startsWith('+55') && !/^\+55[1-9]\d{9,10}$/.test(phone)) return '';
   return isE164(phone) && phone.length >= 9 ? phone : '';
 }
 

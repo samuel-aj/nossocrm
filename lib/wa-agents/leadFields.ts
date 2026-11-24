@@ -110,6 +110,8 @@ export type LeadChange = {
   key?: string;
   mode: 'replace' | 'append' | 'clear';
   value?: string;
+  /** Internal only: a configured AI variable missing from the latest messages. */
+  recoverVariable?: string;
 };
 
 export type LeadPatchResult = {
@@ -131,6 +133,7 @@ export function buildLeadPatch(
     render: (text: string) => string;
     current: { description?: string | null; custom_fields?: Record<string, unknown> | null; title?: string | null };
     defs: CustomFieldDef[];
+    recoverValue?: (variable: string) => string | undefined;
   }
 ): LeadPatchResult {
   const columns: Record<string, unknown> = {};
@@ -183,7 +186,16 @@ export function buildLeadPatch(
           customFields[key] = null;
           break;
         }
-        const r = coerceCustomFieldValue(def, rendered, ch.mode === 'append' ? 'append' : 'replace', customFields[key] ?? currentCf[key]);
+        const currentValue = Object.hasOwn(customFields, key) ? customFields[key] : currentCf[key];
+        let fieldValue = rendered;
+        if (!rendered && ch.recoverVariable && input.recoverValue) {
+          // An older ficha can fill a gap, but a value already recorded on the lead wins.
+          if (currentValue != null && String(currentValue).trim()) break;
+          const recovered = input.recoverValue(ch.recoverVariable);
+          if (recovered === '') break; // e-mail explicitamente ausente na ficha
+          fieldValue = recovered ?? '';
+        }
+        const r = coerceCustomFieldValue(def, fieldValue, ch.mode === 'append' ? 'append' : 'replace', currentValue);
         if (r.ok) customFields[key] = r.value;
         else problems.push(`${def.label || key}: ${r.error}`);
         break;

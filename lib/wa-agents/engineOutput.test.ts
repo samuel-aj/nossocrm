@@ -73,16 +73,34 @@ function fakeDb() {
       let rows = table === 'followup_calendars' && h.calendar ? [h.calendar] : table === 'wa_conversations' ? [h.ctx!.conversation as unknown as Record<string, unknown>] : table === 'wa_messages' ? [{ ...incoming }, ...h.messages] as Record<string, unknown>[] : [];
       let patch: Record<string, unknown> | undefined;
       let single = false;
+      const order: Array<[string, boolean]> = [];
       const q = {
         select: () => q,
         insert: h.notice,
         update: (p: Record<string, unknown>) => { patch = p; return q; },
         eq: (k: string, v: unknown) => { rows = rows.filter(r => r[k] === v); return q; },
+        neq: (k: string, v: unknown) => { rows = rows.filter(r => r[k] !== v); return q; },
         is: (k: string, v: unknown) => { rows = rows.filter(r => v === null ? r[k] == null : r[k] === v); return q; },
         in: (k: string, values: unknown[]) => { rows = rows.filter(r => values.includes(r[k])); return q; },
         gt: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) > v); return q; }, lte: () => q, not: () => q,
         gte: (k: string, v: string) => { rows = rows.filter(r => String(r[k]) >= v); return q; },
-        order: (k: string, options: { ascending: boolean }) => { rows.sort((a,b) => String(a[k]).localeCompare(String(b[k])) * (options.ascending ? 1 : -1)); return q; },
+        or: (filter: string) => {
+          if (filter === 'source.is.null,source.not.in.(agent,api,bot)') {
+            rows = rows.filter(r => !['agent','api','bot'].includes(String(r.source)));
+          }
+          return q;
+        },
+        order: (k: string, options: { ascending: boolean }) => {
+          order.push([k, options.ascending]);
+          rows.sort((a,b) => {
+            for (const [field, ascending] of order) {
+              const cmp = String(a[field]).localeCompare(String(b[field]));
+              if (cmp) return ascending ? cmp : -cmp;
+            }
+            return 0;
+          });
+          return q;
+        },
         limit: (n: number) => { rows = rows.slice(0,n); return q; },
         maybeSingle: () => { single = true; return q; },
         then: (resolve: (r: unknown) => unknown) => {
@@ -123,6 +141,119 @@ beforeEach(() => {
   h.events.mockResolvedValue([]); h.log.mockResolvedValue('run');
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
+
+describe('recuperação durável de entrada com transporte falso', () => {
+  const key = { organizationId: org, conversationId: 'conv', messageId: 'message' };
+  const claim = (completedSteps: string[] = []) => ({ completedSteps, beginStep: vi.fn(), finishStep: vi.fn() });
+
+  it('repete somente a preparação após timeout e emite o webhook de entrada uma vez', async () => {
+    h.agent!.webhooks = [{ id: 'hook', event: 'message_received', url: 'https://example.com', active: true }];
+    h.history.mockRejectedValueOnce(new Error('canceling statement due to statement timeout'));
+    const first = claim();
+    expect(await handleInboundMessage({ ...key, delivery: first })).toMatchObject({ disposition: 'retry' });
+    expect(first.finishStep.mock.calls.map(([step]) => step)).toEqual(['bots', 'message_received']);
+    expect(h.generate).not.toHaveBeenCalled();
+    h.generate.mockResolvedValue(draft('Como posso ajudar?', false));
+    const retry = claim(['bots', 'message_received']);
+    expect(await handleInboundMessage({ ...key, delivery: retry })).toMatchObject({ disposition: 'done', status: 'ok' });
+    expect(retry.beginStep.mock.calls).toEqual([['dispatch']]);
+    expect(h.events.mock.calls.filter(([, event]) => event.event === 'message_received')).toHaveLength(1);
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['[53300] indisponível', '[PGRST003] indisponível', 'remaining connection slots are reserved', 'too many clients already'])(
+    'reagenda falha do pool na preparação: %s', async reason => {
+      h.history.mockRejectedValueOnce(new Error(reason));
+      expect(await handleInboundMessage({ ...key, delivery: claim(['bots']) })).toMatchObject({ disposition: 'retry' });
+      expect(h.generate).not.toHaveBeenCalled();
+      expect(h.send).not.toHaveBeenCalled();
+    });
+
+  it('preserva o webhook de erro definitivo e registra a fase antes de acioná-lo', async () => {
+    h.agent!.webhooks = [{ id: 'hook', event: 'error', url: 'https://example.com', active: true }];
+    h.history.mockRejectedValueOnce(new Error('Falha permanente de preparação'));
+    const delivery = claim(['bots']);
+    expect(await handleInboundMessage({ ...key, delivery })).toMatchObject({ status: 'error', disposition: 'attention' });
+    expect(delivery.beginStep.mock.calls).toEqual([['dispatch']]);
+    expect(h.events).toHaveBeenCalledWith(h.db, expect.objectContaining({ event: 'error' }));
+    expect(h.generate).not.toHaveBeenCalled();
+  });
+
+  it('mantém para revisão envio possivelmente aceito', async () => {
+    h.generate.mockResolvedValue(draft('Olá.', false));
+    h.send.mockRejectedValueOnce(new Error('network timeout'));
+    const delivery = claim(['bots']);
+    expect(await handleInboundMessage({ ...key, delivery })).toMatchObject({ status: 'error', disposition: 'attention' });
+    expect(delivery.beginStep.mock.calls).toEqual([['dispatch']]);
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserva uma intervenção humana durante a geração mesmo quando uma saída automática vem depois', async () => {
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push({ ...incoming, id: 'human', direction: 'out', source: 'crm', created_at: '2026-10-01T12:01:00Z' });
+      h.messages.push({ ...incoming, id: 'bot', direction: 'out', source: 'bot', created_at: '2026-10-01T12:02:00Z' });
+      return draft('Olá.', false);
+    });
+    expect(await handleInboundMessage({ ...key, delivery: claim(['bots']) }))
+      .toMatchObject({ disposition: 'done', reason: 'atendente respondeu por último' });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.action).not.toHaveBeenCalled();
+  });
+
+  it('não move o cursor da recepção para uma nova entrada que chegou durante o modelo do pipeline', async () => {
+    h.ctx!.conversation.ai_last_processed_at = at;
+    const next = { ...incoming, id: 'new-inbound', created_at: '2026-10-01T12:01:00.000Z' };
+    h.generate.mockImplementationOnce(async () => {
+      h.messages.push(next);
+      return draft('Bem-vindo.', false);
+    });
+    expect(await runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'deal', forceReply: true, skipBuffer: true }))
+      .toMatchObject({ status: 'ok' });
+    expect(h.ctx!.conversation.ai_last_processed_at).toBe(at);
+    h.generate.mockResolvedValueOnce(draft('Recebi sua pergunta.', false));
+    expect(await handleInboundMessage({ ...key, messageId: next.id, delivery: claim(['bots']) }))
+      .toMatchObject({ disposition: 'done', status: 'ok' });
+    expect(h.ctx!.conversation.ai_last_processed_at).toBe(next.created_at);
+  });
+
+  it('mantém terminal o cursor já processado e o limite de respostas', async () => {
+    h.ctx!.conversation.ai_last_processed_at = at;
+    expect(await handleInboundMessage({ ...key, delivery: claim(['bots']) })).toMatchObject({ disposition: 'done', reason: 'nada a responder' });
+    h.ctx!.conversation.ai_last_processed_at = null;
+    h.agent!.max_replies = 2;
+    h.ctx!.conversation.ai_state = { respostas: 2 };
+    expect(await handleInboundMessage({ ...key, delivery: claim(['bots']) })).toMatchObject({ disposition: 'done', reason: 'limite de respostas atingido' });
+    expect(h.generate).not.toHaveBeenCalled();
+    expect(h.send).not.toHaveBeenCalled();
+  });
+});
+
+it.each(['conversa', 'simulador'])('processa os dois marcadores da proposta na %s sem expor comandos', async mode => {
+  const agent = h.agent!;
+  agent.line_delay_ms = 0;
+  agent.custom_actions = [{ key: 'etapa-proposta', label: 'Proposta', description: 'Ao apresentar a proposta',
+    actions: [{ type: 'add_tag', tag: 'Proposta' }] }];
+  h.media = [{ id: 'proposta', name: 'proposta', kind: 'video', storage_path: 'org/proposta.mp4', agent_id: agent.id, organization_id: org } as AgentMediaRow];
+  h.generate.mockResolvedValueOnce(draft('Segue a proposta.\n[[enviar_midia: proposta]]\n[[executar_acao: etapa-proposta]]', false));
+  if (mode === 'simulador') {
+    const sim = await testAgentReply(h.db, { organizationId: org, agent, messages: [{ role: 'user', text: 'Sim' }] });
+    expect(sim).toMatchObject({ text: 'Segue a proposta.', media: ['proposta'],
+      toolCalls: [{ tool: 'enviar_midia' }, { tool: 'executar_acao' }] });
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.action).not.toHaveBeenCalled();
+  } else {
+    const transport = vi.spyOn(await import('./media'), 'sendAgentMedia').mockResolvedValue({ ok: true, messageId: 'fake-media' });
+    try {
+      expect(await run()).toMatchObject({ status: 'ok', lines: ['Segue a proposta.'] });
+      expect(h.ctx!.conversation.ai_status).toBe('active');
+      expect(transport).toHaveBeenCalledTimes(1);
+      expect(h.action).toHaveBeenCalledExactlyOnceWith(h.db, expect.objectContaining({ action: agent.custom_actions[0] }));
+    } finally {
+      transport.mockRestore();
+    }
+  }
+  expect(h.generate).toHaveBeenCalledTimes(1);
+});
 
 describe('espera da confirmação do contrato', () => {
   it.each(['conversa', 'simulador'])('descarta texto e conclusão concorrentes na %s', async mode => {
@@ -338,6 +469,29 @@ describe('validação no envio real e no simulador', () => {
       ],
     }));
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
+  });
+  it.each(['conversa', 'simulador'])('transforma o pedido de retorno às 20h em uma reserva na %s, com transporte falso', async mode => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-22T18:00:00Z'));
+    try {
+      h.agent!.tools.scheduled_return_bot_id = org;
+      h.calendar = { organization_id: org, enabled: true, timezone: 'America/Manaus', slots: [{ day: 1, start: '09:00', end: '18:00' }] };
+      const text = 'Pode me chamar às 20h?';
+      h.history.mockResolvedValue([{ role: 'user', content: text }]);
+      const rpc = vi.spyOn(h.db, 'rpc');
+      if (mode === 'conversa') {
+        const result = await run();
+        expect(result).toMatchObject({ status: 'ok', text: expect.stringContaining('20:00') });
+        expect(rpc).toHaveBeenCalledWith('schedule_robot_return', expect.objectContaining({ p_at: '2026-11-23T00:00:00.000Z', p_timezone: 'America/Manaus', p_anchor: at }));
+        expect(h.ctx!.conversation.ai_status).toBe('active');
+      } else {
+        const result = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text }] });
+        expect(result.toolCalls).toContainEqual(expect.objectContaining({ tool: 'agendar_retorno', output: expect.objectContaining({ simulated: true, scheduledAt: '2026-11-23T00:00:00.000Z' }) }));
+        expect(rpc).not.toHaveBeenCalled();
+        expect(h.send).not.toHaveBeenCalled();
+      }
+      expect(h.generate).not.toHaveBeenCalled();
+      expect(h.action).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
   });
   it('retorno permanece vinculado à mensagem anterior quando cliente escreve durante montagem do histórico', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));

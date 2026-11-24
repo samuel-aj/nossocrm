@@ -19,6 +19,8 @@ import type { AgentRow, CustomAction, EndAction, Outcome } from './types';
 export class ActionSkipped extends Error {}
 import { buildWebhookPayload, postWebhook } from './webhooks';
 import { applyLeadChanges, recordLossHistory } from './leadOps';
+import type { LeadChange } from './leadFields';
+import { loadLeadFormData } from './leadFormData';
 
 export type OutcomeActionsResult = {
   handoffAgentId?: string;
@@ -92,7 +94,8 @@ async function runAction(
   admin: SupabaseClient,
   input: { agent: AgentRow; ctx: ConversationContext; source: ActionSource },
   action: EndAction,
-  result: OutcomeActionsResult
+  result: OutcomeActionsResult,
+  getLeadForm: () => ReturnType<typeof loadLeadFormData>
 ): Promise<string> {
   const { agent, ctx, source } = input;
   const orgId = ctx.conversation.organization_id;
@@ -162,7 +165,11 @@ async function runAction(
     case 'update_lead': {
       if (!dealId) throw new ActionSkipped('contato sem lead aberto: nada foi alterado');
       // Os valores já chegam com as variáveis preenchidas (resolveActionTexts)
-      const r = await applyLeadChanges(admin, { organizationId: orgId, dealId, changes: action.changes, render: t => t });
+      const changes: LeadChange[] = action.changes;
+      const registered = new Set(agent.ai_vars.map(v => v.name.toLowerCase()));
+      const form = changes.some(c => c.recoverVariable && registered.has(c.recoverVariable)) ? await getLeadForm() : undefined;
+      const recoverValue = form && ((key: string) => registered.has(key) ? form(key) : undefined);
+      const r = await applyLeadChanges(admin, { organizationId: orgId, dealId, changes, render: t => t, recoverValue });
       if (r.problems.length > 0) {
         throw new Error(`${r.changed.length > 0 ? `alterado: ${r.changed.join(', ')}; ` : ''}não aplicado: ${r.problems.join('; ')}`);
       }
@@ -339,6 +346,12 @@ export async function executeActions(
     pushEvent,
   });
   assertUsageHealthy();
+  let form: ReturnType<typeof loadLeadFormData> | undefined;
+  const getLeadForm = () => form ??= loadLeadFormData(admin, input.ctx, input.agent.id, input.agent.tools?.zapsign_template_token)
+    .catch(() => {
+      pushEvent('ficha_contrato_indisponivel');
+      return loadLeadFormData(admin, input.ctx, input.agent.id);
+    });
 
   // Todas as ações rodam na ordem configurada; a falha de uma não impede as seguintes.
   // `pos` identifica qual delas (duas do mesmo tipo ficam distinguíveis no histórico).
@@ -349,7 +362,7 @@ export async function executeActions(
     if (input.renewLock) await input.renewLock();
     try {
       const resolved = resolveActionTexts(action, aiValues, systemVars);
-      const note = await runAction(admin, input, resolved, result);
+      const note = await runAction(admin, input, resolved, result, getLeadForm);
       input.runEvents.push({ type: 'action', at, pos, action: action.type, ok: true, note, ...origin });
     } catch (e) {
       const skipped = e instanceof ActionSkipped;

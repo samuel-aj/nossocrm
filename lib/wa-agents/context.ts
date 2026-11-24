@@ -8,7 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { agentHistoryText } from './replyOutput';
 import type { ModelMessage } from 'ai';
 import { getConnectionByIdForOrg, type WaConnectionRow } from '@/lib/whatsapp/service';
-import { WaAgentError } from './errors';
+import { dbFailure, WaAgentError } from './errors';
 import { loadDealItems, type ContextDealItem } from './dealItems';
 import { getDealWhatsappGroupField } from '@/lib/whatsapp/group-links/service';
 import { renderTemplate } from './template';
@@ -300,12 +300,13 @@ export async function loadAgent(
   organizationId: string,
   agentId: string
 ): Promise<AgentRow | null> {
-  const { data } = await admin
+  const { data, error } = await admin
     .from('wa_ai_agents')
     .select('*')
     .eq('id', agentId)
     .eq('organization_id', organizationId)
     .maybeSingle();
+  if (error) throw dbFailure(error);
   return data ? normalizeAgentRow(data as Record<string, unknown>) : null;
 }
 
@@ -367,18 +368,19 @@ export async function loadDealContext(
 ): Promise<ContextDeal | null> {
   let deal: DealRaw | null = null;
   if (input.dealId) {
-    const { data } = await admin
+    const { data, error } = await admin
       .from('deals')
       .select(DEAL_COLUMNS)
       .eq('organization_id', organizationId)
       .eq('id', input.dealId)
       .is('deleted_at', null)
       .maybeSingle();
+    if (error) throw dbFailure(error);
     deal = (data as DealRaw | null) ?? null;
   }
   if (!deal && input.contactId) {
     // negócio ABERTO mais recente do contato
-    const { data } = await admin
+    const { data, error } = await admin
       .from('deals')
       .select(DEAL_COLUMNS)
       .eq('organization_id', organizationId)
@@ -389,6 +391,7 @@ export async function loadDealContext(
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (error) throw dbFailure(error);
     deal = (data as DealRaw | null) ?? null;
   }
   if (!deal) return null;
@@ -461,7 +464,7 @@ export async function loadConversationContext(
     .eq('id', conversationId)
     .eq('organization_id', organizationId)
     .maybeSingle();
-  if (error) throw new WaAgentError('DB_ERROR', error.message);
+  if (error) throw dbFailure(error);
   if (!convRaw) throw new WaAgentError('CONVERSATION_NOT_FOUND', 'Conversa não encontrada');
   const conversation = convRaw as WaConversationFull;
 
@@ -471,12 +474,13 @@ export async function loadConversationContext(
 
   let contact: ContextContact | null = null;
   if (conversation.contact_id) {
-    const { data } = await admin
+    const { data, error } = await admin
       .from('contacts')
       .select('id, name, phone, email, company_name')
       .eq('organization_id', organizationId)
       .eq('id', conversation.contact_id)
       .maybeSingle();
+    if (error) throw dbFailure(error);
     contact = (data as ContextContact | null) ?? null;
   }
 
@@ -559,7 +563,8 @@ export async function loadRecentMessages(
     .eq('organization_id', ctx.conversation.organization_id)
     .eq('conversation_id', ctx.conversation.id);
   if (memoriaDesde) q = q.gte('created_at', memoriaDesde);
-  const { data } = await q.order('created_at', { ascending: false }).limit(Math.max(1, limit));
+  const { data, error } = await q.order('created_at', { ascending: false }).limit(Math.max(1, limit));
+  if (error) throw dbFailure(error);
   return ((data ?? []) as WaMessageLite[]).reverse();
 }
 
@@ -1126,6 +1131,9 @@ export function buildSystemPrompt(input: {
   }
   if (agent.tools?.zapsign_template_token) {
     lines.push('- Contrato: quando o cliente quiser contratar, use contrato_zapsign antes de pedir confirmação da ficha. Use a ficha devolvida pela ferramenta como a única conferência dos dados e autorização para gerar o contrato. Com o aceite, chame criar. Aproveite o e-mail que o cliente informou. Se ele não tiver, preferir não informar ou seguir sem responder esse campo, omita o e-mail e prossiga com os outros dados. Nunca invente um endereço. O CRM entrega o link na conversa e aciona o acompanhamento quando o cliente assinar. Mantenha o atendimento disponível. Só confirme assinatura com informação da ZapSign.');
+  }
+  if (agent.tools?.scheduled_return_bot_id && !input.mustClose) {
+    lines.push('- Retorno combinado: quando o cliente pedir para ser chamado ou aceitar uma proposta de dia e horário, consulte o horário e o fuso com consultar_retorno e agende com agendar_retorno. Se faltar o dia, o horário ou o fuso for ambíguo, pergunte. Confirme o combinado somente depois de a ferramenta devolver sucesso; se falhar, informe que o horário ficou sem confirmação. O agente continua neste atendimento.');
   }
   if (agent.tools?.calculator !== false) {
     lines.push('- Contas (percentuais, prazos, valores): chame a ferramenta calcular com a expressão em vez de calcular de cabeça.');

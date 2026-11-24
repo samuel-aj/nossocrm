@@ -34,6 +34,65 @@ function queuedModel(responses: LanguageModelV3GenerateResult[]) {
 }
 
 describe('contrato com o AI SDK instalado', () => {
+  const proposta = { id: 'm1', name: 'proposta', kind: 'video', agent_id: agent.id, organization_id: agent.organization_id } as AgentMediaRow;
+  const propostaAgent = { ...agent, custom_actions: [{ key: 'etapa-proposta', label: 'Proposta', description: 'Apresentou proposta', actions: [
+    { type: 'move_stage' as const, stage_id: 'etapa' }, { type: 'add_tag' as const, tag: 'Proposta' },
+  ] }] };
+  const proposalDraft = 'Veja a proposta.\n[[enviar_midia: proposta]]\n[[executar_acao: etapa-proposta]]\nConseguiu abrir?';
+  it('prepara o vídeo e a ação cadastrada na ordem da proposta, conservando a fala', async () => {
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const model = queuedModel([text(proposalDraft)]);
+    const reply = await generateAgentReply({ ...input, agent: propostaAgent, model, runtime: { media: [proposta], sendMedia } });
+    expect(reply.segments).toEqual([{ kind: 'text', text: 'Veja a proposta.', step: 0 }, { kind: 'media', name: 'proposta', step: 0, caption: undefined },
+      { kind: 'text', text: 'Conseguiu abrir?', step: 0 }]);
+    expect(reply.toolCalls).toMatchObject([{ tool: 'enviar_midia', input: { nome: 'proposta' }, output: { ok: true } },
+      { tool: 'executar_acao', input: { acao: 'etapa-proposta', detalhes: expect.any(String) }, output: { ok: true } }]);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(reply.outputSafety.status).toBe('repaired');
+    expect(model.doGenerateCalls).toHaveLength(1);
+  });
+  it('respeita chamadas nativas já feitas e referências duplicadas na mesma resposta', async () => {
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const model = queuedModel([response([{ type: 'tool-call', toolCallId: 'proposta', toolName: 'enviar_midia', input: '{"nome":"proposta"}' }]),
+      text(proposalDraft + '\n[[acao: etapa-proposta]]')]);
+    const reply = await generateAgentReply({ ...input, agent: propostaAgent, model, runtime: { media: [proposta], sendMedia } });
+    expect(reply.toolCalls.map(c => c.tool)).toEqual(['enviar_midia', 'executar_acao']);
+    expect(sendMedia).toHaveBeenCalledTimes(1);
+    expect(reply.segments.filter(s => s.kind === 'media')).toHaveLength(1);
+  });
+  it('resolve o marcador de vídeo junto da referência nomeada usando o mesmo arquivo do catálogo', async () => {
+    const sendMedia = vi.fn().mockResolvedValue({ ok: true });
+    const model = queuedModel([text(proposalDraft.replace('[[enviar_midia: proposta]]', '[vídeo]\n[[enviar_midia: Proposta]]'))]);
+    const reply = await generateAgentReply({ ...input, agent: propostaAgent, model,
+      runtime: { media: [proposta, { ...proposta, id: 'm2', name: 'Proposta' }], sendMedia } });
+    expect(sendMedia).toHaveBeenCalledExactlyOnceWith(proposta, undefined);
+    expect(reply.segments.filter(s => s.kind === 'media')).toMatchObject([{ name: 'proposta' }]);
+    expect(reply.toolCalls.map(c => c.tool)).toEqual(['enviar_midia', 'executar_acao']);
+  });
+  it.each([true, false])('distingue mídia já entregue de falha ao preparar (entregue: %s)', async alreadyDelivered => {
+    const sendMedia = vi.fn().mockResolvedValue({ ok: false, alreadyDelivered });
+    const reply = await generateAgentReply({ ...input, agent: propostaAgent, model: queuedModel([text(proposalDraft)]), runtime: { media: [proposta], sendMedia } });
+    expect(reply.outputSafety.status).toBe(alreadyDelivered ? 'repaired' : 'blocked');
+    expect(reply.toolCalls.map(c => c.tool)).toEqual(alreadyDelivered ? ['executar_acao'] : []);
+    expect(reply.segments.filter(s => s.kind === 'media')).toHaveLength(0);
+  });
+  it.each([
+    [proposalDraft + '\n[[executar_acao: desconhecida]]', 'Oi'],
+    [proposalDraft + '\n[[executar_acao: transferir]]', 'Oi'],
+    [proposalDraft + '\n{"dados":{}}', 'Oi'],
+    ['O sistema usa [[executar_acao: etapa-proposta]] no fluxo.', 'Oi'],
+    [proposalDraft, 'O que significa [[enviar_midia: proposta]]?'],
+    [proposalDraft, 'Oi', 'outra-org'],
+  ])('não executa referências citadas, fora de escopo ou misturadas com dados internos (%s)', async (draft, user, org) => {
+    const sendMedia = vi.fn();
+    const model = queuedModel([text(draft), text('{"replacements":[{"id":0,"text":"Posso ajudar?"}]}')]);
+    const reply = await generateAgentReply({ ...input, agent: { ...propostaAgent, custom_actions: [...propostaAgent.custom_actions,
+      { key: 'transferir', label: 'Transferir', description: 'Transfere', actions: [{ type: 'stop' }] }] }, model,
+      messages: [{role: 'user', content: user}], runtime: { media: [{...proposta, organization_id: org ?? agent.organization_id}], sendMedia } });
+    expect(sendMedia).not.toHaveBeenCalled();
+    expect(reply.toolCalls).toEqual([]);
+    expect(reply.text).toBe('Posso ajudar?');
+  });
   it.each([
     [{ ok: true, aguardando_confirmacao_zapsign: true }, 'confirmation', 'criar'],
     [{ ok: true, existente: true, aguarda_assinatura_no_atendimento: true }, 'delivery', 'preparar'],

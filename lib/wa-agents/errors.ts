@@ -12,6 +12,12 @@ export class WaAgentError extends Error {
   }
 }
 
+/** Preserve the database reason after a run is recorded and its Error object is gone. */
+export function dbFailure(error: { message: string; code?: string }): WaAgentError {
+  const reason = error.code ? `[${error.code}] ${error.message}` : error.message;
+  return new WaAgentError('DB_ERROR', reason);
+}
+
 /** Mensagem legível de qualquer erro (nunca lança). */
 export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message || e.name;

@@ -100,7 +100,11 @@ export function prepareAgentDraft(input: {
   if (proposedName && norm(proposedName) !== norm(identity.name)) {
     identity.name = evidenced(proposedName) || norm(previous?.name ?? '') === norm(proposedName) ? proposedName : '';
   }
-  if (proposedPhone && signerPhone(proposedPhone) !== signerPhone(identity.phone)) {
+  // A later tool call may repeat a stale contact number or mistype a digit.
+  // The customer's actual reply to the displayed ficha identifies the signer.
+  if (accepted?.phone !== undefined) {
+    identity.phone = accepted.phone;
+  } else if (proposedPhone && signerPhone(proposedPhone) !== signerPhone(identity.phone)) {
     const number = signerPhone(proposedPhone);
     const attested = input.turns.some(t => t.ok && t.direction === 'in' && containsPhone(t.text, number));
     identity.phone = attested || number === previous?.phone ? number : '';
@@ -288,6 +292,7 @@ function parseFicha(text: string) {
   // WhatsApp bold ("*CPF:* 123") is not part of the label or the value.
   const raw = summary.replaceAll('*', '');
   const fields = new Map<string, string | null>();
+  let phone: string | undefined;
   // A sentence ends a field only when a plain label follows. "Av. Brasil, 120 · CPF: …"
   // is one address: what comes after "Av." has a comma or a separator before the next colon.
   for (const line of raw.split(/[\n·;]|\.\s+(?=(?:[\p{L}][^.:!?\n·;,]{0,65}:|(?:você )?(?:confirma|confere|posso|estão|está)\b))/iu)) {
@@ -296,13 +301,17 @@ function parseFicha(text: string) {
     const key = normalizeVarName(match[1]);
     const value = plain(match[2]);
     fields.set(key, fields.has(key) && fields.get(key) !== value ? null : value);
+    if (signerField(key) === 'phone') {
+      const number = signerPhone(value);
+      // Empty means the displayed number was invalid or the labels disagree.
+      phone = phone === undefined || phone === number ? number : '';
+    }
   }
   const name = fields.get('nomecompleto') ?? fields.get('nome');
-  const phone = fields.get('telefonecomddd') ?? fields.get('telefone') ?? fields.get('celular');
   const email = fields.get('email');
   // A generic "tudo certo?" can attest only to an identifiable review.
-  if (!/\b(?:ficha|dados)\b/i.test(text) && !(name && phone)) return;
-  return { fields, name: name && fullSignerName(name) ? name : undefined, phone: phone ? signerPhone(phone) : undefined,
+  if (!/\b(?:ficha|dados)\b/i.test(text) && !(name && phone !== undefined)) return;
+  return { fields, name: name && fullSignerName(name) ? name : undefined, phone,
     email: email ? signerEmail(email.replace(/[.,!?]+$/u, '')) : undefined };
 }
 
