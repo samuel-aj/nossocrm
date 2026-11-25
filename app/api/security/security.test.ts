@@ -98,6 +98,11 @@ describe('GET /api/security/events', () => {
     expect(state.filters).toContainEqual(['eq', 'severity', 'warning']);
     expect(state.filters.some(f => f[1] === 'organization_id' && f[0] === 'eq')).toBe(false);
   });
+
+  it('type=logins filtra só login realizado e senha recusada', async () => {
+    await GET(new Request('https://crm.test/api/security/events?type=logins&severity=critical'));
+    expect(state.filters).toContainEqual(['in', 'action', ['auth.login', 'auth.login_failed']]);
+  });
 });
 
 describe('POST /api/security/login-failed', () => {

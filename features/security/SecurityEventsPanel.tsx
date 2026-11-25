@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Building2, CalendarDays, ChevronDown, ChevronRight, Gauge, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Building2, CalendarDays, ChevronDown, ChevronRight, ListFilter, Loader2, RefreshCw, ShieldAlert } from 'lucide-react';
 import { NativeSelect } from '@/components/ui/NativeSelect';
 import { detailLines, eventLabel, severityLabel } from './eventLabels';
 import { FilterField, FilterSelect, type FilterOption } from './FilterSelect';
@@ -9,7 +9,7 @@ import { FilterField, FilterSelect, type FilterOption } from './FilterSelect';
 /**
  * Registro de segurança (só super admin): eventos críticos gravados pelo
  * servidor e pelo banco, lidos por /api/security/events. Login realizado é
- * informativo: aparece ao escolher "Tudo" na gravidade.
+ * informativo: aparece ao escolher "Logins" ou "Tudo" no campo Mostrar.
  */
 
 type SecurityEventRow = {
@@ -34,6 +34,7 @@ const PERIODS: FilterOption[] = [
 const SEVERITY_FILTERS: FilterOption[] = [
   { value: 'important', label: 'Importantes', description: 'Atenção e críticos', dot: 'bg-amber-500' },
   { value: 'critical', label: 'Só críticos', description: 'O que pede ação imediata', dot: 'bg-red-500' },
+  { value: 'logins', label: 'Logins', description: 'Quem entrou e senhas recusadas', dot: 'bg-sky-500' },
   { value: 'all', label: 'Tudo', description: 'Inclui logins e informativos', dot: 'bg-slate-400' },
 ];
 
@@ -54,7 +55,7 @@ const dateFormat = new Intl.DateTimeFormat('pt-BR', {
 
 export function SecurityEventsPanel({ organizations }: { organizations: Array<{ id: string; name: string }> }) {
   const [period, setPeriod] = useState('7d');
-  // Abre só no que importa (atenção + crítico); o informativo fica a um clique.
+  // Abre só no que importa (atenção + crítico); logins e informativos ficam a um clique.
   const [severity, setSeverity] = useState('important');
   const [summary, setSummary] = useState<{ critical: number; warning: number } | null>(null);
   const [org, setOrg] = useState('all');
@@ -70,7 +71,8 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
   const load = useCallback(
     async (before?: string) => {
       const params = new URLSearchParams({ period });
-      if (severity !== 'all') params.set('severity', severity);
+      if (severity === 'logins') params.set('type', 'logins');
+      else if (severity !== 'all') params.set('severity', severity);
       if (org !== 'all') params.set('org', org);
       if (before) params.set('before', before);
       const request = ++requestRef.current;
@@ -141,8 +143,8 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
           widthClass="w-44"
         />
         <FilterSelect
-          icon={<Gauge size={13} aria-hidden="true" />}
-          label="Gravidade"
+          icon={<ListFilter size={13} aria-hidden="true" />}
+          label="Mostrar"
           value={severity}
           onChange={setSeverity}
           options={SEVERITY_FILTERS}
@@ -187,7 +189,9 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
         <p className="text-sm text-slate-500 dark:text-slate-400 py-6">
           {severity === 'all'
             ? 'Nenhum evento neste período.'
-            : 'Nenhum evento importante neste período. Para ver também os informativos (como os logins), escolha "Tudo".'}
+            : severity === 'logins'
+              ? 'Nenhum login neste período.'
+              : 'Nenhum evento importante neste período. Para ver os logins, escolha "Logins" em Mostrar.'}
         </p>
       ) : (
         <ul

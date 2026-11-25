@@ -7,6 +7,7 @@
  *
  * Filtros: ?period=24h|7d|30d|90d  ?org=<uuid>
  *          ?severity=info|warning|critical|important (important = atenção + crítico)
+ *          ?type=logins (só login realizado e senha recusada)
  *          ?before=<ISO> (página seguinte)
  */
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
@@ -25,6 +26,7 @@ const PERIOD_MS: Record<string, number> = {
   '90d': 90 * 24 * 3600_000,
 };
 const SEVERITIES = new Set(['info', 'warning', 'critical']);
+const LOGIN_ACTIONS = ['auth.login', 'auth.login_failed'];
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -77,7 +79,8 @@ export async function GET(req: Request) {
     .order('created_at', { ascending: false })
     .limit(PAGE + 1);
   const orgFilter = org && isValidUUID(org) ? org : null;
-  if (severity === 'important') query = query.in('severity', ['warning', 'critical']);
+  if (url.searchParams.get('type') === 'logins') query = query.in('action', LOGIN_ACTIONS);
+  else if (severity === 'important') query = query.in('severity', ['warning', 'critical']);
   else if (SEVERITIES.has(severity)) query = query.eq('severity', severity);
   if (orgFilter) query = query.eq('organization_id', orgFilter);
   if (before && !Number.isNaN(Date.parse(before))) query = query.lt('created_at', new Date(before).toISOString());
