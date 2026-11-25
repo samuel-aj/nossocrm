@@ -565,11 +565,12 @@ describe('validação no envio real e no simulador', () => {
       const rpc = vi.spyOn(h.db, 'rpc');
       if (mode === 'conversa') {
         const result = await run();
-        expect(result).toMatchObject({ status: 'ok', text: expect.stringContaining('20:00') });
+        expect(result).toMatchObject({ status: 'ok', text: 'Combinado! Te chamo hoje (22/11) às 20h.' });
         expect(rpc).toHaveBeenCalledWith('schedule_robot_return', expect.objectContaining({ p_at: '2026-11-23T00:00:00.000Z', p_timezone: 'America/Manaus', p_anchor: at }));
         expect(h.ctx!.conversation.ai_status).toBe('active');
       } else {
         const result = await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text }] });
+        expect(result.text).toBe('Combinado! Te chamo hoje (22/11) às 20h.');
         expect(result.toolCalls).toContainEqual(expect.objectContaining({ tool: 'agendar_retorno', output: expect.objectContaining({ simulated: true, scheduledAt: '2026-11-23T00:00:00.000Z' }) }));
         expect(rpc).not.toHaveBeenCalled();
         expect(h.send).not.toHaveBeenCalled();

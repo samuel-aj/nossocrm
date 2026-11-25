@@ -9,6 +9,12 @@ afterEach(() => vi.useRealTimers());
 it('não oferece ações de retorno quando não configurado', () => {
   expect(buildAgentTools({ ...agent, tools: { calculator: false } }).agendar_retorno).toBeUndefined();
 });
+it('pede ao modelo uma confirmação curta, sem ano nem fuso', () => {
+  const runtime = scheduledReturnRuntime({ rpc: vi.fn() } as never, 'org', 'conv', agent, null);
+  const description = String(buildAgentTools(agent, { scheduledReturn: runtime }).agendar_retorno.description);
+  expect(description).toContain('sem ano nem fuso');
+  expect(description).not.toContain('repita a data e o fuso');
+});
 it('grava somente RPC com contexto confiável, sem iniciar robô ou escolher outro destino', async () => {
   const rpc = vi.fn(async () => ({ data: 'return-id', error: null }));
   const runtime = scheduledReturnRuntime({ rpc } as never, 'org', 'conv', agent, 'anchor');
