@@ -55,6 +55,7 @@ import { splitLines } from './split';
 import { normalizeKeyword } from './text';
 import { MEDIA_MESSAGE_COLUMNS, understandMedia, type MediaMessageRow } from './mediaIn';
 import { typingDelayMs } from './typing';
+import { createGapReporter } from './knowledgeGaps';
 import { buildAgentTools, findByName, type AgentToolRuntime } from './tools';
 import { pickInboundAgent } from './triggers';
 import type {
@@ -901,6 +902,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       knowledge,
       mustClose,
       followup: input.followup ?? null,
+      knowledgeGaps: !!agent.tools?.knowledge_gaps,
     });
     if (agent.tools?.zapsign_template_token && conv.deal_id && conv.contact_id) {
       const { agentContractFact } = await import('@/lib/zapsign/agentContractFact');
@@ -962,6 +964,14 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       documents: resources.documents,
       media: resources.media,
       helpers: resources.helpers,
+      ...(runAgent.tools?.knowledge_gaps ? {
+        reportGap: createGapReporter(admin, {
+          organizationId,
+          agentId: runAgent.id,
+          source: { kind: 'conversation', conversationId },
+          onEvent: pushEvent,
+        }),
+      } : {}),
       searchKnowledge: async (q, documentId) => {
         knowledgeCalls += 1;
         if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {

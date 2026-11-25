@@ -77,6 +77,7 @@ import {
   WaAgentsApiError,
   useSaveWaAgent,
   useWaAgentDocuments,
+  useWaAgentKnowledgeGaps,
   useWaAgentMedia,
   useWaAgentOptions,
   useWaAgentsList,
@@ -91,6 +92,7 @@ import { PromptEditor, insertToken, mediaToken } from './PromptEditor';
 import { HighlightedScript } from './HighlightedScript';
 import type { KnownTokens } from './tokens';
 import { FollowupsEditor } from './FollowupsEditor';
+import { KnowledgeGapsPanel } from './KnowledgeGapsPanel';
 import { KnowledgePanel } from './KnowledgePanel';
 import { AgentContractSetting } from './AgentContractSetting';
 import { AgentTestDrawer } from './AgentTestDrawer';
@@ -302,7 +304,12 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     triggers: normalizeTriggers(src.triggers),
     webhooks: src.webhooks ?? [],
     helper_agent_ids: src.helper_agent_ids ?? [],
-    tools: { ...src.tools, calculator: src.tools?.calculator ?? true, scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null },
+    tools: {
+      ...src.tools,
+      calculator: src.tools?.calculator ?? true,
+      scheduled_return_bot_id: src.tools?.scheduled_return_bot_id ?? null,
+      knowledge_gaps: src.tools?.knowledge_gaps === true,
+    },
     typing: (({ ms_per_char, min_ms, max_ms }) => ({ ms_per_char, min_ms, max_ms }))(normalizeTyping(src.typing)),
     media_understanding: { ...DEFAULT_AGENT_MEDIA_UNDERSTANDING, ...(src.media_understanding ?? {}) },
     auto_lead: { ...DEFAULT_AGENT_AUTO_LEAD, ...(src.auto_lead ?? {}) },
@@ -941,6 +948,7 @@ export const AgentEditor: React.FC<{
 
   const docsQ = useWaAgentDocuments(agentId);
   const mediaQ = useWaAgentMedia(agentId);
+  const gapsQ = useWaAgentKnowledgeGaps(agentId, 'open');
 
   // Aba sincronizada com o hash (#roteiro, #conhecimento...). Ao sair, devolve o hash da lista (#agentes).
   useEffect(() => {
@@ -1129,6 +1137,7 @@ export const AgentEditor: React.FC<{
   const disabledHelpers = helperCandidates.filter((a) => !a.enabled && !form.helper_agent_ids.includes(a.id)).map((a) => a.id);
   const knowledgeCount = (docsQ.data?.length ?? 0) + (mediaQ.data?.length ?? 0);
   const countBadge = (n: number) => (n > 0 ? <Badge tone="slate">{n}</Badge> : undefined);
+  const openGaps = gapsQ.data?.counts.open ?? 0;
 
   // Variáveis, ações e mídias que existem de verdade: o roteiro e o "Quando encerrar"
   // destacam em âmbar o que estiver escrito como token mas não existir.
@@ -1145,7 +1154,12 @@ export const AgentEditor: React.FC<{
       id: 'conhecimento',
       label: 'Conhecimento',
       icon: <BookOpen size={16} aria-hidden="true" />,
-      badge: countBadge(knowledgeCount),
+      badge: (
+        <>
+          {countBadge(knowledgeCount)}
+          {openGaps > 0 ? <Badge tone="amber">{openGaps === 1 ? '1 dúvida' : `${openGaps} dúvidas`}</Badge> : null}
+        </>
+      ),
     },
     {
       id: 'acoes',
@@ -1277,6 +1291,15 @@ export const AgentEditor: React.FC<{
           onRenameMedia={renameMediaTokens}
           onRequestSave={() => void handleSave()}
           saving={save.isPending}
+          learnedByDocument={gapsQ.data?.learned_by_document}
+          gapsPanel={
+            <KnowledgeGapsPanel
+              agentId={agentId}
+              enabled={form.tools.knowledge_gaps === true}
+              documents={docsQ.data ?? []}
+              onOpenSettings={() => setTab('acoes')}
+            />
+          }
         />
       </TabPanel>
 
@@ -1334,6 +1357,17 @@ export const AgentEditor: React.FC<{
                   checked={form.tools.calculator}
                   onChange={(calculator) => patch({ tools: { ...form.tools, calculator } })}
                   label="Calculadora"
+                />
+              }
+            />
+            <SettingRow
+              title="Aprender com dúvidas sem resposta"
+              tip="Ferramenta registrar_duvida_sem_resposta: quando o agente não acha a resposta no roteiro nem na base, ele registra a pergunta em Conhecimento › Dúvidas sem resposta para você responder."
+              control={
+                <Toggle
+                  checked={form.tools.knowledge_gaps === true}
+                  onChange={(knowledge_gaps) => patch({ tools: { ...form.tools, knowledge_gaps } })}
+                  label="Aprender com dúvidas sem resposta"
                 />
               }
             />

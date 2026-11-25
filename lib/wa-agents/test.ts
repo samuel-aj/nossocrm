@@ -34,6 +34,7 @@ import { splitLines } from './split';
 import { normalizeKeyword } from './text';
 import { simulatedMediaNames } from './mediaDelivery';
 import { reserveTestMedia, settleTestMedia, testDeliveredMediaNames, type TestMediaReceipt } from './testMediaDelivery';
+import { createGapReporter } from './knowledgeGaps';
 import type { AgentToolRuntime } from './tools';
 import type { AgentRow, KnowledgeHit } from './types';
 
@@ -194,7 +195,7 @@ async function testAgentReplyWithUsage(
   if (resources.documents.length > 0 && lastUser && !configuredKnowledgeIds(agent).size) {
     knowledge = await searchKnowledge(admin, { organizationId, agent, query: lastUser, limit: AUTO_KNOWLEDGE_LIMIT });
   }
-  const system = buildSystemPrompt({ agent, ctx, resources, knowledge }) +
+  const system = buildSystemPrompt({ agent, ctx, resources, knowledge, knowledgeGaps: !!agent.tools?.knowledge_gaps }) +
     (input.contractState === 'signed' ? '\nZapSign simulada: cliente assinou e recebeu o acompanhamento.' :
       input.contractState === 'invited' ? '\nZapSign simulada: o link foi entregue. Aguardando assinatura.' : '');
   const messages = toModelMessages(input.messages);
@@ -232,6 +233,13 @@ async function testAgentReplyWithUsage(
     documents: resources.documents,
     media: resources.media,
     helpers: resources.helpers,
+    ...(agent.tools?.knowledge_gaps ? {
+      reportGap: createGapReporter(admin, {
+        organizationId,
+        agentId: agent.id,
+        source: { kind: 'test', sessionId: input.session?.id ?? null },
+      }),
+    } : {}),
     searchKnowledge: async (q, documentId) => {
       knowledgeCalls += 1;
       if (knowledgeCalls > MAX_KNOWLEDGE_CALLS_PER_RUN) {

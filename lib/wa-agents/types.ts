@@ -198,6 +198,8 @@ export const AgentToolsSchema = z.object({
   zapsign_template_token: z.string().trim().min(1).max(160).nullable().optional(),
   zapsign_variables: z.record(z.string().min(1).max(160), z.string().max(1000)).optional(),
   zapsign_signed_message_template: z.string().uuid().nullable().optional(),
+  /** Ferramenta registrar_duvida_sem_resposta (aprender com dúvidas sem resposta); ausente = desligada */
+  knowledge_gaps: z.boolean().optional(),
 });
 export type AgentTools = z.infer<typeof AgentToolsSchema>;
 export const DEFAULT_AGENT_TOOLS: AgentTools = { calculator: true };

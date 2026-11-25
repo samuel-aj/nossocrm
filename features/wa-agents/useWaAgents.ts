@@ -21,6 +21,7 @@ import type {
   BotRunRow,
   RunRow,
 } from '@/lib/wa-agents/types';
+import type { KnowledgeGapAction, KnowledgeGapListResult, KnowledgeGapRow, KnowledgeGapStatus } from '@/lib/wa-agents/knowledgeGapsShared';
 import { describeZodIssue } from './ui';
 
 export const WA_AGENTS_QUERY_KEY = 'waAgents';
@@ -307,6 +308,9 @@ export function useWaAgentAssist() {
 
 const documentsKey = (agentId: string | null | undefined) => [WA_AGENTS_QUERY_KEY, 'documents', agentId ?? ''];
 const mediaKey = (agentId: string | null | undefined) => [WA_AGENTS_QUERY_KEY, 'media', agentId ?? ''];
+const gapsKey = (agentId: string | null | undefined, status?: KnowledgeGapStatus) =>
+  status ? [WA_AGENTS_QUERY_KEY, 'gaps', agentId ?? '', status] : [WA_AGENTS_QUERY_KEY, 'gaps', agentId ?? ''];
+const GAP_SUMMARY_KEY = [WA_AGENTS_QUERY_KEY, 'gapSummary'];
 
 /**
  * Sobe um arquivo do agente direto para o bucket privado `wa-agent-files`
@@ -376,6 +380,9 @@ export function useDeleteWaAgentDocument(agentId: string | null | undefined) {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+      // As respostas aprendidas do documento excluído voltam para Abertas
+      void qc.invalidateQueries({ queryKey: gapsKey(agentId) });
+      void qc.invalidateQueries({ queryKey: GAP_SUMMARY_KEY });
     },
   });
 }
@@ -423,6 +430,61 @@ export function useReprocessWaAgentDocument(agentId: string | null | undefined) 
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+// ---------------------------------------------------------------- Dúvidas sem resposta
+
+/** Dúvidas de um status do agente, com os totais e as respostas por documento. */
+export function useWaAgentKnowledgeGaps(agentId: string | null | undefined, status: KnowledgeGapStatus) {
+  return useQuery({
+    queryKey: gapsKey(agentId, status),
+    queryFn: () => waAgentsFetch<KnowledgeGapListResult>(`/api/wa-agents/agents/${agentId}/knowledge-gaps${toQuery({ status })}`),
+    enabled: !!agentId,
+  });
+}
+
+/** Dúvidas abertas por agente (etiqueta na lista de agentes). */
+export function useWaKnowledgeGapSummary(enabled = true) {
+  return useQuery({
+    queryKey: GAP_SUMMARY_KEY,
+    queryFn: async () => (await waAgentsFetch<{ counts?: Record<string, number> }>('/api/wa-agents/knowledge-gaps/summary')).counts ?? {},
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Incluir, editar, tirar da base, ignorar ou reabrir uma dúvida. */
+export function useKnowledgeGapAction(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ gapId, action }: { gapId: string; action: KnowledgeGapAction }): Promise<KnowledgeGapRow> => {
+      const json = await waAgentsFetch<{ gap: KnowledgeGapRow }>(`/api/wa-agents/agents/${agentId}/knowledge-gaps/${gapId}`, {
+        method: 'PATCH',
+        body: action,
+      });
+      return json.gap;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: gapsKey(agentId) });
+      void qc.invalidateQueries({ queryKey: GAP_SUMMARY_KEY });
+      void qc.invalidateQueries({ queryKey: documentsKey(agentId) });
+    },
+  });
+}
+
+/** Exclui uma dúvida aberta ou ignorada. */
+export function useDeleteKnowledgeGap(agentId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (gapId: string) => {
+      await waAgentsFetch<{ ok: boolean }>(`/api/wa-agents/agents/${agentId}/knowledge-gaps/${gapId}`, { method: 'DELETE' });
+      return gapId;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: gapsKey(agentId) });
+      void qc.invalidateQueries({ queryKey: GAP_SUMMARY_KEY });
     },
   });
 }

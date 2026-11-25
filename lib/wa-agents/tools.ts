@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { CALC_FUNCTIONS, evaluateExpression, formatCalcResult } from './calc';
 import { errorMessage } from './errors';
 import { formatKnowledgeHits } from './knowledge';
+import { GAP_TOOL_INPUT_MAX, type GapReportInput } from './knowledgeGapsShared';
 import { configuredKnowledgeIds, knowledgeLookups } from './knowledgeActions';
 import { SAVED_DATA_KEY_MAX_CHARS, SAVED_DATA_MAX_KEYS, SAVED_DATA_VALUE_MAX_CHARS } from './savedData';
 import { normalizeKeyword } from './text';
@@ -38,7 +39,14 @@ export type AgentToolRuntime = {
   searchKnowledge?: (question: string, documentId?: string) => Promise<KnowledgeHit[]>;
   sendMedia?: (media: AgentMediaRow, caption?: string) => Promise<MediaSendResult>;
   consultHelper?: (helper: AgentRow, question: string) => Promise<string>;
+  /** Dúvida sem resposta: liga registrar_duvida_sem_resposta (com a opção ligada no agente) */
+  reportGap?: (input: GapReportInput) => Promise<unknown>;
 };
+
+/** Ferramenta da opção "Aprender com dúvidas sem resposta". */
+export const KNOWLEDGE_GAP_TOOL = 'registrar_duvida_sem_resposta';
+const KNOWLEDGE_GAP_TOOL_DESCRIPTION =
+  'Registra para a equipe uma dúvida do cliente que você não conseguiu responder com o roteiro nem com a base de conhecimento (consulte a base antes, quando houver). Chame uma vez por dúvida, com a pergunta escrita de forma genérica e sem dados do cliente. Isso só avisa a equipe e não muda a sua resposta: responda ao cliente como o roteiro orienta para dúvidas sem resposta e não invente a informação.';
 
 /** Uma consulta por documento e pergunta neste turno, inclusive em chamadas paralelas. */
 function createDocumentLookup(agent: AgentRow, runtime: AgentToolRuntime) {
@@ -234,6 +242,31 @@ export function buildAgentTools(agent: AgentRow, runtime: AgentToolRuntime = {})
     });
   }
   Object.assign(tools, buildUtilityTools(agent, runtime, reservedDocuments));
+  if (agent.tools?.knowledge_gaps && runtime.reportGap) {
+    const report = runtime.reportGap;
+    tools[KNOWLEDGE_GAP_TOOL] = tool({
+      description: KNOWLEDGE_GAP_TOOL_DESCRIPTION,
+      inputSchema: z.object({
+        pergunta: z
+          .string()
+          .max(GAP_TOOL_INPUT_MAX)
+          .describe('A dúvida do cliente escrita como pergunta genérica de FAQ, sem nome, telefone, CPF, valores ou outros dados do cliente. Ex.: "Qual é o prazo para receber o primeiro pagamento do auxílio?"'),
+        o_que_falta: z.string().max(GAP_TOOL_INPUT_MAX).optional().describe('O que a base já diz sobre o assunto e o que faltou para responder'),
+        resposta_sugerida: z
+          .string()
+          .max(GAP_TOOL_INPUT_MAX)
+          .optional()
+          .describe('Rascunho de resposta só com o que a base já diz, quando houver informação parcial. Deixe vazio se não houver'),
+      }),
+      execute: async input => {
+        try {
+          return await report(input);
+        } catch (e) {
+          return { ok: false, erro: errorMessage(e) };
+        }
+      },
+    });
+  }
   const clips = runtime.voiceClips;
   if (clips?.length) {
     tools.falar_trecho = tool({
