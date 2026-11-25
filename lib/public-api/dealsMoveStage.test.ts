@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const h = vi.hoisted(() => ({ client: null as any, writes: [] as Record<string, unknown>[] }));
+const h = vi.hoisted(() => ({ client: null as any, writes: [] as Record<string, unknown>[], filters: [] as unknown[][] }));
 vi.mock('@/lib/supabase/server', () => ({ createStaticAdminClient: () => h.client }));
 vi.mock('@/lib/supabase/actorClient', () => ({ withActor: (client: unknown) => client }));
 vi.mock('@/lib/public-api/resolve', () => ({ resolveBoardId: async () => '00000000-0000-4000-8000-000000000002' }));
@@ -10,7 +10,7 @@ const protocolId = '00000000-0000-4000-8000-000000000003';
 const lostId = '00000000-0000-4000-8000-000000000004';
 let stageId: string;
 beforeEach(() => {
-  h.writes = []; stageId = protocolId;
+  h.writes = []; h.filters = []; stageId = protocolId;
   h.client = { from: (table: string) => {
     let patch: Record<string, unknown> | undefined;
     const response = (single: boolean) => {
@@ -21,7 +21,7 @@ beforeEach(() => {
       if (patch) h.writes.push(patch);
       return { data: single ? rows[0] : rows, error: null };
     };
-    const q: any = { select: () => q, eq: () => q, is: () => q, in: () => q, order: () => q,
+    const q: any = { select: () => q, eq: (...args: unknown[]) => { h.filters.push([table, ...args]); return q; }, is: () => q, in: () => q, order: () => q,
       limit: () => q, update: (value: Record<string, unknown>) => { patch = value; return q; },
       maybeSingle: async () => response(true), then: (resolve: any) => Promise.resolve(response(false)).then(resolve) };
     return q;
@@ -53,12 +53,15 @@ describe('deal id validation', () => {
     const result = await moveStageByDealId({ organizationId: 'org', dealId: autoLeadDealId, target: { to_stage_id: stageId } });
     expect(result).toMatchObject({ ok: true, status: 200 });
     expect(h.writes[0]).toMatchObject({ stage_id: protocolId });
+    expect(h.filters.filter(f => f[0] === 'deals' && f[1] === 'id')).toEqual([['deals', 'id', autoLeadDealId], ['deals', 'id', autoLeadDealId]]);
   });
 
   it('still rejects a value that is not a UUID before touching the database', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const from = vi.spyOn(h.client, 'from');
     const result = await moveStageByDealId({ organizationId: 'org', dealId: 'not-a-uuid', target: { to_stage_id: stageId } });
     expect(result).toMatchObject({ ok: false, status: 422, body: { error: 'Invalid deal id', code: 'VALIDATION_ERROR' } });
+    expect(from).not.toHaveBeenCalled();
     expect(h.writes).toHaveLength(0);
     warn.mockRestore();
   });
