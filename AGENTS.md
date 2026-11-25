@@ -15,6 +15,15 @@
 - **Cache**: Single Source of Truth pattern (see Cache Rules below)
 - **AI**: SDK v6, chat via `/api/ai/chat`, tools in `lib/ai/tools.ts` (always filter by `organization_id`)
 
+## Deploy & Restore Points (CRITICAL)
+- Production = push to `main` (Vercel deploys automatically). The CRM is in use: never push to `main` without the owner's explicit OK.
+- Other sessions publish to `main` in parallel: always `git fetch` and merge `origin/main` before pushing.
+- Before every push to `main`, bookmark what is live: `npm run checkpoint -- <short-name>` (creates and pushes the tag `prod-pre-<short-name>` at the current production commit).
+- A release that needs SQL ships with an undo file `docs/<name>-rollback.sql` whose header says when to use it and whether it runs before or after rolling the code back. Add the pair to the table in `docs/restauracao.md`.
+- Never force-push or delete `main`, and never delete `prod-pre-*` tags.
+- Never run destructive SQL or delete Storage files in production without a restore path (Storage objects are NOT covered by database backups).
+- How to roll back code, schema and data: `docs/restauracao.md`.
+
 ## Cache Rules (CRITICAL)
 - **One cache per entity**: All operations (CRUD, Realtime, optimistic) use the SAME cache
 - **Deals**: Always use `[...queryKeys.deals.lists(), 'view']` for all mutations
