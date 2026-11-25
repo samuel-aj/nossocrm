@@ -17,6 +17,7 @@ export default defineConfig({
       'features/settings/components/LifecycleSettingsModal.test.tsx',
       'lib/security/auditLog.test.ts',
       'lib/security/rateLimit.test.ts',
+      'lib/security/passwordPolicy.test.ts',
       'lib/public-api/auth.test.ts',
       'features/security/eventLabels.test.ts',
       'features/security/SecurityEventsPanel.test.tsx',

@@ -1,6 +1,7 @@
 import { canManageTeam } from '@/lib/permissions/teamAccessServer';
 import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
+import { weakPasswordMessage, zPassword } from '@/lib/security/passwordPolicy';
 import { z } from 'zod';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -122,7 +123,7 @@ export async function GET() {
 const CreateUserSchema = z
   .object({
     email: z.string().email(),
-    password: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres'),
+    password: zPassword,
     role: z.enum([UserRole.ADMIN, UserRole.VENDEDOR]).default(UserRole.VENDEDOR),
     name: z.string().min(1).max(200).optional(),
   })
@@ -256,7 +257,7 @@ export async function POST(req: Request) {
       email_confirm: true,
       user_metadata: userMetadata,
     });
-    if (updateError) return json({ error: safeErrorMessage(updateError) }, 400);
+    if (updateError) return json({ error: weakPasswordMessage(updateError) ?? safeErrorMessage(updateError) }, 400);
     userId = existingAuthUser.id;
   } else {
     const { data: authData, error: createError } = await admin.auth.admin.createUser({
@@ -265,7 +266,7 @@ export async function POST(req: Request) {
       email_confirm: true,
       user_metadata: userMetadata,
     });
-    if (createError) return json({ error: safeErrorMessage(createError) }, 400);
+    if (createError) return json({ error: weakPasswordMessage(createError) ?? safeErrorMessage(createError) }, 400);
     userId = authData.user.id;
   }
 
