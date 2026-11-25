@@ -37,9 +37,14 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
   }
 
   // Quem já errou a chave vezes demais neste minuto nem chega ao banco.
-  const ipKey = `public_api_invalid:${requestMeta(request).ip ?? 'sem-ip'}`;
+  const ip = requestMeta(request).ip ?? 'sem-ip';
+  const ipKey = `public_api_invalid:${ip}`;
   const blocked = rateLimitPeek(ipKey, LIMITS.publicApiInvalidPerIp());
-  if (blocked) return limited(blocked);
+  if (blocked) {
+    // Sinal de tentativa de adivinhar chave: fica no painel de segurança.
+    await logRateLimitExceeded({ scope: 'public_api_invalid', id: ip, limit: blocked.limit, request }, blocked);
+    return limited(blocked);
+  }
 
   const sb = getAnonSupabase();
   if (!sb) {

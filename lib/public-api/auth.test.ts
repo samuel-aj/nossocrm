@@ -76,6 +76,10 @@ describe('limites da API pública', () => {
     expect(state.rpcCalls).toBe(callsBefore);
     // outro IP não é afetado
     expect((await authPublicApi(req('boa', '203.0.113.31'))).ok).toBe(true);
+    // o bloqueio do IP fica registrado uma vez
+    const logged = state.inserts.filter(r => r.action === 'rate_limit.exceeded');
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({ ip_address: '203.0.113.30', details: { limite: 'public_api_invalid', por_minuto: 2 } });
   });
 
   it('sem chave continua 401 e não conta', async () => {
