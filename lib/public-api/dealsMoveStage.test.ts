@@ -47,6 +47,23 @@ describe('API stage movement delegates automatic commercial outcomes to the DB',
   });
 });
 
+describe('deal id validation', () => {
+  it('moves a deal created by the WhatsApp auto lead, whose id is a version 8 UUID', async () => {
+    const autoLeadDealId = 'a1b2c3d4-e5f6-8a7b-9c0d-1e2f3a4b5c6d';
+    const result = await moveStageByDealId({ organizationId: 'org', dealId: autoLeadDealId, target: { to_stage_id: stageId } });
+    expect(result).toMatchObject({ ok: true, status: 200 });
+    expect(h.writes[0]).toMatchObject({ stage_id: protocolId });
+  });
+
+  it('still rejects a value that is not a UUID before touching the database', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const result = await moveStageByDealId({ organizationId: 'org', dealId: 'not-a-uuid', target: { to_stage_id: stageId } });
+    expect(result).toMatchObject({ ok: false, status: 422, body: { error: 'Invalid deal id', code: 'VALIDATION_ERROR' } });
+    expect(h.writes).toHaveLength(0);
+    warn.mockRestore();
+  });
+});
+
 it.each([false, true])('movement responses keep explicit unknown without leaking storage flags (identity=%s)', async identity => {
   const result = await move(identity);
   expect(result.ok).toBe(true);

@@ -31,10 +31,14 @@ import { OrganizationId, ClientCompanyId } from '@/types';
 import { supabase } from './client';
 
 /**
- * Expressão regular para validação de UUID v4.
+ * Expressão regular para validação de UUID (RFC 9562, versões 1 a 8).
+ *
+ * O banco gera v4, mas o lead automático do WhatsApp cria contatos e negócios
+ * com id determinístico versão 8 (lib/wa-agents/autoLead.ts). Restringir a
+ * versão aqui faz o próprio CRM recusar registros que existem no banco.
  * @constant
  */
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Verifica se um valor é um UUID válido.
