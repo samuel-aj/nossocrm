@@ -13,6 +13,7 @@ import {
   Plus,
   Users,
   Shield,
+  ShieldAlert,
   Power,
   PowerOff,
   Pencil,
@@ -470,6 +471,12 @@ export default function AdminPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => document.getElementById('registro-seguranca')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="text-sm font-medium text-primary-600 hover:text-primary-500 dark:text-primary-400 flex items-center gap-1"
+            >
+              <ShieldAlert size={16} /> Registro de segurança
+            </button>
             <button
               onClick={() => router.push('/')}
               className="text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 flex items-center gap-1"

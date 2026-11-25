@@ -112,7 +112,7 @@ export function SecurityEventsPanel({ organizations }: { organizations: Array<{ 
   }, [load]);
 
   return (
-    <section className="bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl p-5 mt-6">
+    <section id="registro-seguranca" className="scroll-mt-4 bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-xl p-5 mt-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
         <div className="flex items-center gap-2">
           <ShieldAlert size={18} className="text-primary-500" aria-hidden="true" />
