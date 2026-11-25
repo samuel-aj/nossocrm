@@ -125,7 +125,8 @@ export default function SelectOrgPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-dark-bg flex items-center justify-center relative overflow-hidden p-4">
+    // Mesmo esquema do login: com o aviso de instalação visível, reserva o topo e o aviso rola com a tela.
+    <div data-install-banner-space className="min-h-screen bg-slate-50 dark:bg-dark-bg flex items-center justify-center relative overflow-hidden p-4 [body:has([data-install-banner])_&]:pt-40">
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
         <div className="absolute -top-[20%] -right-[10%] w-[50%] h-[50%] bg-primary-500/20 rounded-full blur-[120px]" />
         <div className="absolute top-[40%] -left-[10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[100px]" />
