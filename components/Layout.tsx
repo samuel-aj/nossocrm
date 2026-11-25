@@ -854,19 +854,20 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <span className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-widest whitespace-nowrap">
               Desenvolvido por
             </span>
-            {/* Assinatura horizontal em uma cor: noite no tema claro, branca no escuro */}
+            {/* Assinatura horizontal em uma cor: noite no tema claro, branca no escuro.
+                188x26 deixa o símbolo acima de 24 px, o mínimo da marca para a versão com a dobra aberta. */}
             <Image
               src="/logo-aj-horizontal-mono-noite.svg"
               alt="Anúncio Jurídico"
-              width={160}
-              height={22}
+              width={188}
+              height={26}
               className="opacity-50 hover:opacity-80 transition-opacity dark:hidden"
             />
             <Image
               src="/logo-aj-horizontal-branco.svg"
               alt="Anúncio Jurídico"
-              width={160}
-              height={22}
+              width={188}
+              height={26}
               className="opacity-50 hover:opacity-80 transition-opacity hidden dark:block"
             />
           </div>

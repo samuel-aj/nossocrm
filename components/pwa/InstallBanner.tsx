@@ -9,8 +9,10 @@ export function InstallBanner() {
 
   if (!isEligible || isDismissed) return null;
 
+  // data-install-banner avisa as telas que reservam o topo para este aviso (por exemplo app/login/page.tsx).
+  // Nessas telas (data-install-banner-space) ele deixa de ser fixo e rola junto com a página.
   return (
-    <div data-install-banner className="fixed left-3 right-3 top-3 z-[9999] md:left-[calc(0.75rem+var(--app-sidebar-width,0px))] md:right-3">
+    <div data-install-banner className="fixed left-3 right-3 top-3 z-[9999] [body:has([data-install-banner-space])_&]:absolute md:left-[calc(0.75rem+var(--app-sidebar-width,0px))] md:right-3">
       <div className="glass border border-slate-200 dark:border-white/10 rounded-2xl px-4 py-3 shadow-lg">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 h-9 w-9 rounded-xl bg-primary-500/10 flex items-center justify-center shrink-0">
