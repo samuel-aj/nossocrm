@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentRow } from './types';
 import type { ConversationContext } from './context';
 import { ensureAutoLead } from './autoLead';
+import { isValidUUID, sanitizeUUID } from '@/lib/supabase/utils';
 
 vi.mock('./context', () => ({ loadDealContext: async (_db: unknown, _org: string, input: { dealId: string }) => ({ id: input.dealId }) }));
 
@@ -66,5 +67,15 @@ describe('lead automático de entrada sem negócio vinculado', () => {
     expect(insertedIds).toEqual([deals[0].id, deals[0].id]);
     expect(ctx.deal?.id).toBe(deals[0].id);
     expect(ctx.conversation.deal_id).toBe(deals[0].id);
+  });
+
+  it('grava o negócio com um id que os validadores do CRM aceitam', async () => {
+    const { run, insertedIds } = setup();
+    await expect(run()).rejects.toThrow('network timeout');
+    const dealId = insertedIds[0] as string;
+    expect(typeof dealId).toBe('string');
+    // Mudança de etapa pela IA, aba Contrato e consulta à ZapSign passam o id por estes validadores.
+    expect(isValidUUID(dealId)).toBe(true);
+    expect(sanitizeUUID(dealId)).toBe(dealId);
   });
 });

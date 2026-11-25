@@ -49,6 +49,29 @@ describe('reassigning a lead contact', () => {
   });
 });
 
+describe('contacts created by the WhatsApp auto lead (version 8 ids)', () => {
+  const autoLeadContactId = '0f1e2d3c-4b5a-8697-8877-665544332211';
+  beforeEach(() => { vi.clearAllMocks(); mocks.organization.mockResolvedValue('current-org'); });
+  it('keeps the contact when creating a lead instead of storing the lead without one', async () => {
+    const board = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: contactId, organization_id: dealId }, error: null }) };
+    const lead = { insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: dealId, contact_id: autoLeadContactId }, error: null }) };
+    const items = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    mocks.from.mockImplementation(table => table === 'boards' ? board : table === 'deals' ? lead : items);
+    const input = { boardId: contactId, title: 'New lead', status: contactId, items: [], contactId: autoLeadContactId } as Parameters<typeof dealsService.create>[0];
+    const result = await dealsService.create(input);
+    expect(result.error).toBeNull();
+    expect(lead.insert.mock.calls[0][0]).toMatchObject({ contact_id: autoLeadContactId });
+    expect(result.data?.contactId).toBe(autoLeadContactId);
+  });
+  it('accepts the contact when reassigning a lead', async () => {
+    const contact = query({ data: { id: autoLeadContactId }, error: null });
+    const lead = query({ data: { id: dealId, contact_id: autoLeadContactId, updated_at: 'confirmed' }, error: null });
+    mocks.from.mockImplementation(table => table === 'contacts' ? contact : lead);
+    expect(await dealsService.update(dealId, { contactId: autoLeadContactId })).toEqual({ data: { id: dealId, contactId: autoLeadContactId, updatedAt: 'confirmed' }, error: null });
+    expect(lead.update).toHaveBeenCalledWith(expect.objectContaining({ contact_id: autoLeadContactId }));
+  });
+});
+
 describe('native lead source writes', () => {
   beforeEach(() => { vi.clearAllMocks(); mocks.organization.mockResolvedValue('current-org'); });
   it.each([undefined, null, '  Feira   local  '])('creates a deal with deliberate source intent %s without rewriting original UTMs', async leadSource => {

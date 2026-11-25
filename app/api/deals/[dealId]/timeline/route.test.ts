@@ -65,3 +65,17 @@ describe('authorized timeline endpoint', () => {
   it('rejects bad cursor before reading database', async () => { expect((await request('?cursor=bad')).status).toBe(400); expect(calls).toEqual([]); });
   it('returns failures rather than empty history', async () => { failure = true; expect((await request()).status).toBe(500); });
 });
+
+describe('WhatsApp auto lead deal', () => {
+  const autoLeadDealId = 'a1b2c3d4-e5f6-8a7b-9c0d-1e2f3a4b5c6d';
+  const open = (id: string) => GET(new Request(`https://crm.test/api/deals/${id}/timeline`), { params: Promise.resolve({ dealId: id }) });
+  it('serves the timeline of a deal whose id is a version 8 UUID', async () => {
+    expect((await open(autoLeadDealId)).status).toBe(200);
+    expect(calls.find(c => c.table === 'deals')?.filters).toContainEqual(['id', autoLeadDealId]);
+    expect(calls.find(c => c.table === 'activities')?.filters).toContainEqual(['deal_id', autoLeadDealId]);
+  });
+  it('still rejects a value that is not a UUID before reading database', async () => {
+    expect((await open('not-a-uuid')).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+});
