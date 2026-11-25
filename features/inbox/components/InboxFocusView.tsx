@@ -21,6 +21,7 @@ import {
 import { FocusItem, AISuggestion } from '../hooks/useInboxController';
 import { Activity, DealView } from '@/types';
 import { FocusContextPanel } from './FocusContextPanel';
+import { activityForFocusDeal, PLACEHOLDER_DEAL_PREFIX } from './focusActivity';
 import { useCRM } from '@/context/CRMContext';
 import { useMoveDealSimple } from '@/lib/query/hooks';
 import { useAuth } from '@/context/AuthContext';
@@ -210,7 +211,7 @@ export const InboxFocusView: React.FC<InboxFocusViewProps> = ({
     // Se não tem deal mas tem contact, cria um placeholder para o Cockpit
     const nowIso = new Date().toISOString();
     const placeholderDeal = !deal && contact ? {
-      id: `placeholder-${contact.id}`,
+      id: `${PLACEHOLDER_DEAL_PREFIX}${contact.id}`,
       title: `Reativar: ${contact.name}`,
       contactId: contact.id,
       boardId: activeBoard?.id || '',
@@ -241,6 +242,10 @@ export const InboxFocusView: React.FC<InboxFocusViewProps> = ({
   const handleMoveStage = (stageId: string) => contextData?.deal && moveDeal(contextData.deal, stageId);
   const handleMarkWon = () => contextData?.deal && updateDeal(contextData.deal.id, { isWon: true, isLost: false, closedAt: new Date().toISOString() });
   const handleMarkLost = () => contextData?.deal && updateDeal(contextData.deal.id, { isWon: false, isLost: true, closedAt: new Date().toISOString() });
+  // O negócio fictício de um contato sem lead não existe no banco: o registro
+  // feito a partir dele sai sem negócio, em vez de levar um id que o serviço recusa.
+  const handleAddActivity = (activity: Partial<Activity>) =>
+    addActivity(activityForFocusDeal(activity) as Parameters<typeof addActivity>[0]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -551,7 +556,7 @@ export const InboxFocusView: React.FC<InboxFocusViewProps> = ({
                 onMoveStage={handleMoveStage}
                 onMarkWon={handleMarkWon}
                 onMarkLost={handleMarkLost}
-                onAddActivity={addActivity}
+                onAddActivity={handleAddActivity}
                 onUpdateActivity={updateActivity}
                 onClose={() => setShowContext(false)}
               />

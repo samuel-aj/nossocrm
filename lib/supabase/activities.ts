@@ -14,8 +14,24 @@
 
 import { supabase } from './client';
 import { Activity } from '@/types';
-import { sanitizeUUID } from './utils';
+import { readLinkId, sanitizeUUID, UNREADABLE_CONTACT_MESSAGE, UNREADABLE_DEAL_MESSAGE } from './utils';
 import { sortActivitiesSmart } from '@/lib/utils/activitySort';
+
+type ActivityLinksResult = { ok: true; dealId: string | null; contactId: string | null } | { ok: false; error: Error };
+
+/**
+ * Lê negócio e contato de uma atividade antes de gravar.
+ *
+ * Vazio continua valendo "sem vínculo". Valor preenchido que não tem formato
+ * de id é erro: gravar null no lugar deixaria a atividade solta, em silêncio.
+ */
+const readActivityLinks = (activity: Pick<Partial<Activity>, 'dealId' | 'contactId'>): ActivityLinksResult => {
+  const deal = readLinkId(activity.dealId);
+  if (!deal.ok) return { ok: false, error: new Error(UNREADABLE_DEAL_MESSAGE) };
+  const contact = readLinkId(activity.contactId);
+  if (!contact.ok) return { ok: false, error: new Error(UNREADABLE_CONTACT_MESSAGE) };
+  return { ok: true, dealId: deal.id, contactId: contact.id };
+};
 
 // =============================================================================
 // Organization inference: centralizada em ./orgId (org POR ABA + fallback perfil)
@@ -96,9 +112,13 @@ const transformActivity = (db: DbActivityWithDeal): Activity => ({
  * Transforma atividade do formato da aplicação para o formato DB.
  * 
  * @param activity - Atividade parcial no formato da aplicação.
+ * @param links - Negócio e contato já lidos por `readActivityLinks`.
  * @returns Atividade parcial no formato do banco.
  */
-const transformActivityToDb = (activity: Partial<Activity>): Partial<DbActivity> => {
+const transformActivityToDb = (
+  activity: Partial<Activity>,
+  links: { dealId: string | null; contactId: string | null }
+): Partial<DbActivity> => {
   const db: Partial<DbActivity> = {};
 
   if (activity.title !== undefined) db.title = activity.title;
@@ -106,8 +126,8 @@ const transformActivityToDb = (activity: Partial<Activity>): Partial<DbActivity>
   if (activity.type !== undefined) db.type = activity.type;
   if (activity.date !== undefined) db.date = activity.date;
   if (activity.completed !== undefined) db.completed = activity.completed;
-  if (activity.dealId !== undefined) db.deal_id = sanitizeUUID(activity.dealId);
-  if (activity.contactId !== undefined) db.contact_id = sanitizeUUID(activity.contactId);
+  if (activity.dealId !== undefined) db.deal_id = links.dealId;
+  if (activity.contactId !== undefined) db.contact_id = links.contactId;
   if (activity.clientCompanyId !== undefined) (db as any).client_company_id = sanitizeUUID(activity.clientCompanyId);
   if (activity.participantContactIds !== undefined) (db as any).participant_contact_ids = activity.participantContactIds || [];
   if ((activity as any).assignedTo !== undefined) (db as any).assigned_to = sanitizeUUID((activity as any).assignedTo) || null;
@@ -160,6 +180,9 @@ export const activitiesService = {
       const sb = supabase;
       if (!sb) return { data: null, error: new Error('Supabase não configurado') };
 
+      const links = readActivityLinks(activity);
+      if (!links.ok) return { data: null, error: links.error };
+
       const orgId = await getCurrentOrganizationId();
 
       const insertData: any = {
@@ -168,8 +191,8 @@ export const activitiesService = {
         type: activity.type,
         date: activity.date,
         completed: activity.completed || false,
-        deal_id: sanitizeUUID(activity.dealId),
-        contact_id: sanitizeUUID(activity.contactId),
+        deal_id: links.dealId,
+        contact_id: links.contactId,
         client_company_id: sanitizeUUID(activity.clientCompanyId),
         participant_contact_ids: activity.participantContactIds || [],
         assigned_to: sanitizeUUID(activity.assignedTo) || null,
@@ -214,7 +237,10 @@ export const activitiesService = {
       const sb = supabase;
       if (!sb) return { error: new Error('Supabase não configurado') };
 
-      const dbUpdates = transformActivityToDb(updates);
+      const links = readActivityLinks(updates);
+      if (!links.ok) return { error: links.error };
+
+      const dbUpdates = transformActivityToDb(updates, links);
 
       const { error } = await sb.from('activities').update(dbUpdates as any).eq('id', id);
 

@@ -38,6 +38,17 @@ it('restaura classificação, motivo e status no cartão e na lista se a perda n
   expect(mock.activity).not.toHaveBeenCalled();
 });
 
+it('mantém o card na nova etapa quando o registro do histórico é recusado', async () => {
+  // Guarda: o movimento já foi salvo quando o histórico é gravado; uma recusa ali nunca pode desfazê-lo.
+  mock.activity.mockResolvedValue({ data: null, error: new Error('Não foi possível identificar o lead.') });
+  const { result, client } = setup();
+  await act(async () => { await result.current.moveDeal(deal, 'lost', 'Sem perfil', false, true, 'disqualified'); });
+  expect(mock.update).toHaveBeenCalledTimes(1);
+  expect(mock.activity).toHaveBeenCalledWith(expect.objectContaining({ dealId: 'lead', type: 'STATUS_CHANGE' }));
+  expect(client.getQueryData<Deal[]>(DEALS_VIEW_KEY)?.[0]).toMatchObject({ status: 'lost', isLost: true });
+  expect(client.getQueryData<Deal>(queryKeys.deals.detail(deal.id))).toMatchObject({ status: 'lost', isLost: true });
+});
+
 it('preserva a entrada na etapa ao marcar perda sem mover de etapa', async () => {
   const currentDeal = { ...deal, lastStageChangeDate: '2026-09-01T12:00:00Z' };
   const { result, client } = setup(currentDeal);
