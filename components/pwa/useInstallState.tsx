@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -37,6 +37,14 @@ function platformHint(): InstallState['platformHint'] {
   return 'desktop';
 }
 
+// No servidor e durante a hidratação vale `false`; logo depois o React renderiza de novo com `true`.
+// Tudo o que depende do aparelho (iPhone, app instalado, dispensa gravada) só entra na tela a partir daí:
+// antes, o iPhone renderizava o aviso já na hidratação, o HTML do servidor não batia e o React refazia a página.
+const subscribeNever = () => () => {};
+function useHydrated(): boolean {
+  return useSyncExternalStore(subscribeNever, () => true, () => false);
+}
+
 function readDismissedAt(): number | null {
   try {
     const raw = localStorage.getItem(DISMISS_KEY);
@@ -49,6 +57,7 @@ function readDismissedAt(): number | null {
 }
 
 export function useInstallState(): InstallState {
+  const hydrated = useHydrated();
   const [bipEvent, setBipEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [standalone, setStandalone] = useState<boolean>(() => detectStandalone());
   const [dismissedAt, setDismissedAt] = useState<number | null>(() => (typeof window === 'undefined' ? null : readDismissedAt()));
@@ -114,13 +123,13 @@ export function useInstallState(): InstallState {
   };
 
   return {
-    isStandalone: standalone,
-    isEligible,
+    isStandalone: hydrated && standalone,
+    isEligible: hydrated && isEligible,
     canPrompt,
-    isDismissed,
+    isDismissed: hydrated && isDismissed,
     promptInstall,
     dismiss,
-    platformHint: platformHint(),
+    platformHint: hydrated ? platformHint() : 'unknown',
   };
 }
 
