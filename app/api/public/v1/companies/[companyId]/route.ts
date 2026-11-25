@@ -16,7 +16,7 @@ const CompanyPatchSchema = z.object({
 
 export async function GET(request: Request, ctx: { params: Promise<{ companyId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { companyId } = await ctx.params;
   if (!isValidUUID(companyId)) {
@@ -40,7 +40,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ companyId: 
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ companyId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { companyId } = await ctx.params;
   if (!isValidUUID(companyId)) {

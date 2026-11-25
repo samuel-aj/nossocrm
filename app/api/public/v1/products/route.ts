@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 // dinamicamente — sem hardcode de IDs por organização.
 export async function GET(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const sb = createStaticAdminClient();
   const { data, error } = await sb

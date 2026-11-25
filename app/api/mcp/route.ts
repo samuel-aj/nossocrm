@@ -95,7 +95,7 @@ export async function POST(request: Request) {
   const auth = await authMcp(request);
   if (!auth.ok) {
     // JSON-RPC friendly error envelope (MCP clients will still see 401 if they surface it)
-    return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: auth.body.error, data: auth.body } }, { status: auth.status });
+    return NextResponse.json({ jsonrpc: '2.0', id: null, error: { code: -32001, message: auth.body.error, data: auth.body } }, { status: auth.status, headers: auth.headers });
   }
 
   const body = (await readRpcBody(request)) as JsonRpcRequest | null;

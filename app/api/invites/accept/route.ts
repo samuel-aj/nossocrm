@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { clientIp, enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createStaticAdminClient } from '@/lib/supabase/server';
@@ -31,6 +32,9 @@ const AcceptInviteSchema = z
 export async function POST(req: Request) {
   // Mitigação CSRF: cria usuário (efeito colateral), só aceita same-origin.
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
+  // Rota aberta: limite por IP contra tentativa de adivinhar convite.
+  const limited = await enforceRateLimit({ scope: 'invites', id: clientIp(req), limit: LIMITS.invitesPerIp(), request: req });
+  if (limited) return limited;
 
   const raw = await req.json().catch(() => null);
   const parsed = AcceptInviteSchema.safeParse(raw);

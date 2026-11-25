@@ -13,6 +13,7 @@
 // -> 200 { result?: any, error?: string, consentType?: string, retryAfter?: number }
 
 import { generateObject, generateText } from 'ai';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { getModel, type AIProvider } from '@/lib/ai/config';
 import { z } from 'zod';
@@ -155,6 +156,9 @@ export async function POST(req: Request) {
   if (!user) {
     return json<AIActionResponse>({ error: 'Unauthorized' }, 401);
   }
+  // Cada ação gasta a chave de IA da organização: limite por usuário.
+  const limited = await enforceRateLimit({ scope: 'ai', id: user.id, limit: LIMITS.aiPerUser(), request: req, actorId: user.id });
+  if (limited) return limited;
 
   const body = await req.json().catch(() => null);
   const action = body?.action as AIAction | undefined;

@@ -1,4 +1,5 @@
 import 'server-only';
+import { LIMITS, logRateLimitExceeded, rateLimit, rateLimitMessage } from '@/lib/security/rateLimit';
 
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
@@ -73,6 +74,13 @@ export async function requireAITaskContext(req: Request): Promise<AITaskContext>
 
   if (!user) {
     throw new AITaskHttpError(401, 'UNAUTHORIZED', 'Unauthorized');
+  }
+
+  // Cada tarefa gasta a chave de IA da organização: limite por usuário.
+  const aiLimit = rateLimit(`ai:${user.id}`, LIMITS.aiPerUser());
+  if (!aiLimit.ok) {
+    await logRateLimitExceeded({ scope: 'ai', id: user.id, limit: aiLimit.limit, request: req, actorId: user.id }, aiLimit);
+    throw new AITaskHttpError(429, 'RATE_LIMITED', rateLimitMessage(aiLimit));
   }
 
   const { data: profile, error: profileError } = await supabase

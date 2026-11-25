@@ -15,6 +15,10 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
       description: [
         'API pública do NossoCRM para integrações (n8n/Make). Produto em primeiro lugar: copiar → colar → testar.',
         '',
+        '## Limites de uso',
+        'Cada chave de API pode fazer até **600 requisições por minuto**. Acima disso a resposta é `429` com `code: "RATE_LIMITED"`, o campo `retry_after` (segundos) e o header `Retry-After`: espere esse tempo e repita. Os headers `RateLimit-Limit`, `RateLimit-Remaining` e `RateLimit-Reset` acompanham a resposta 429.',
+        'Tentativas repetidas com chave inválida a partir do mesmo IP também são bloqueadas por um minuto. Uma chave revogada para de funcionar na hora.',
+        '',
         '## Webhooks de saída (Follow-up)',
         'Em **Configurações → Integrações → Follow-up** você cadastra a URL do seu n8n/Make e marca os avisos:',
         '- `deal.stage_changed` — lead mudou de etapa',
@@ -56,6 +60,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           properties: {
             error: { type: 'string' },
             code: { type: 'string' },
+            retry_after: { type: 'integer', description: 'Só no 429: segundos até poder repetir.' },
           },
           required: ['error'],
         },
@@ -313,6 +318,20 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
           },
         },
+        TooManyRequests: {
+          description: 'Limite de requisições por minuto atingido. Espere `retry_after` segundos e repita.',
+          headers: {
+            'Retry-After': { description: 'Segundos até poder repetir', schema: { type: 'integer' } },
+          },
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ErrorResponse' },
+              examples: {
+                limited: { value: { error: 'Muitas requisições em pouco tempo. Tente novamente em 42 segundos.', code: 'RATE_LIMITED', retry_after: 42 } },
+              },
+            },
+          },
+        },
       },
     },
     paths: {
@@ -371,6 +390,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -397,6 +417,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -421,6 +442,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -450,6 +472,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
             400: { description: 'Corpo inválido / modelo em conexão sem API oficial', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
             404: { description: 'Nenhum número conectado / connection_id inexistente', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             409: { description: 'Número desconectado (DISCONNECTED) ou agente de IA pausado nesta conversa (AGENT_PAUSED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             502: {
@@ -486,6 +509,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
             404: { description: 'Mensagem inexistente ou sem mídia', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
         },
@@ -537,6 +561,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
             400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
             404: { description: 'Nenhum número conectado / connection_id inexistente', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             409: { description: 'Conversa de agente nativo do CRM (NATIVE_AGENT)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
@@ -574,6 +599,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -609,6 +635,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -677,6 +704,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
             400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
             404: { description: 'Número ou agente não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             409: { description: 'Agentes desligados na org (AGENTS_OFF) ou ação inválida para o estado atual', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
@@ -737,6 +765,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
             400: { description: 'Corpo inválido', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
             404: { description: 'Número ou robô não encontrado', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
             409: { description: 'Agentes desligados na org (AGENTS_OFF) ou nenhum robô em andamento', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } } } },
           },
@@ -768,6 +797,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -800,6 +830,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -826,6 +857,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -854,6 +886,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -887,6 +920,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {
@@ -920,6 +954,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             },
             200: { description: 'Updated', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -935,6 +970,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Company' } }, required: ['data'] } } },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         patch: {
@@ -946,6 +982,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -980,6 +1017,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {
@@ -1018,6 +1056,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             201: { description: 'Created', content: { 'application/json': { schema: { type: 'object' } } } },
             200: { description: 'Updated', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1030,6 +1069,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Contact' } }, required: ['data'] } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         patch: {
@@ -1041,6 +1081,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1079,6 +1120,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {
@@ -1186,6 +1228,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
             200: { description: 'Negócio já existia (idempotência por contato+estágio aberto ou external_id) — retorna o existente (action: "existing")', content: { 'application/json': { schema: { type: 'object' } } } },
             422: { description: 'Payload inválido (ex.: owner_id/owner_email não pertence à organização — code OWNER_NOT_FOUND)' },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1198,6 +1241,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Deal' } }, required: ['data'] } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         patch: {
@@ -1372,6 +1416,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1425,6 +1470,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             200: { description: 'OK', content: { 'application/json': { schema: { type: 'object' } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1456,6 +1502,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {
@@ -1479,6 +1526,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/DealNote' }, action: { type: 'string' } }, required: ['data'] } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1510,6 +1558,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {
@@ -1538,6 +1587,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
           responses: {
             201: { description: 'Created', content: { 'application/json': { schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/DealItem' }, action: { type: 'string' } }, required: ['data'] } } } },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
       },
@@ -1591,6 +1641,7 @@ export function getPublicApiOpenApiDocument(): OpenApiDocument {
               },
             },
             401: { $ref: '#/components/responses/Unauthorized' },
+            429: { $ref: '#/components/responses/TooManyRequests' },
           },
         },
         post: {

@@ -16,7 +16,7 @@ const CompanyUpsertSchema = z.object({
 
 export async function GET(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const url = new URL(request.url);
   const q = (url.searchParams.get('q') || '').trim();
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const body = await request.json().catch(() => null);
   const parsed = CompanyUpsertSchema.safeParse(body);

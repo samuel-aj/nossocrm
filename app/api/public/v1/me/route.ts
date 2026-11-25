@@ -6,7 +6,7 @@ export const runtime = 'nodejs';
 export async function GET(request: Request) {
   const auth = await authPublicApi(request);
   if (!auth.ok) {
-    return NextResponse.json(auth.body, { status: auth.status });
+    return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
   }
 
   return NextResponse.json({

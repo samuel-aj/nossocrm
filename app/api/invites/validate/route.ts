@@ -1,4 +1,5 @@
 import { createStaticAdminClient } from '@/lib/supabase/server';
+import { clientIp, enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { safeErrorMessage } from '@/lib/security/safeError';
 
 function json<T>(body: T, status = 200): Response {
@@ -15,6 +16,9 @@ function json<T>(body: T, status = 200): Response {
  * @returns {Promise<Response>} Retorna um valor do tipo `Promise<Response>`.
  */
 export async function GET(req: Request) {
+  // Rota aberta: limite por IP contra tentativa de adivinhar convite.
+  const limited = await enforceRateLimit({ scope: 'invites', id: clientIp(req), limit: LIMITS.invitesPerIp(), request: req });
+  if (limited) return limited;
   const url = new URL(req.url);
   const token = url.searchParams.get('token');
 

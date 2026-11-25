@@ -9,6 +9,7 @@
  * confere antes de enviar.
  */
 import { z } from 'zod';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { json } from '@/lib/whatsapp/api';
 import { createClient } from '@/lib/supabase/server';
@@ -31,6 +32,8 @@ const Body = z.object({
 export async function POST(req: Request) {
   const auth = await guardRoute({ req });
   if (!auth.ok) return auth.response;
+  const limited = await enforceRateLimit({ scope: 'ai', id: auth.user.id, limit: LIMITS.aiPerUser(), request: req, actorId: auth.user.id, organizationId: auth.user.organizationId });
+  if (limited) return limited;
   const orgId = auth.user.organizationId;
   const parsed = Body.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);
