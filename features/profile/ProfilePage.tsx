@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
 import { getErrorMessage } from '@/lib/utils/errorUtils';
+import { PASSWORD_MIN_LENGTH, PASSWORD_PLACEHOLDER, PASSWORD_RULES_MESSAGE, isPasswordValid as checkPassword } from '@/lib/security/passwordPolicy';
+import { PasswordChecklist } from '@/components/ui/PasswordChecklist';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { isE164, normalizePhoneE164 } from '@/lib/phone';
@@ -30,13 +32,7 @@ export const ProfilePage: React.FC = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Performance: memoize validation (avoids regex work on unrelated state changes).
-    const passwordRequirements = useMemo(() => ({
-        minLength: newPassword.length >= 6,
-        hasLowercase: /[a-z]/.test(newPassword),
-        hasUppercase: /[A-Z]/.test(newPassword),
-        hasDigit: /\d/.test(newPassword),
-    }), [newPassword]);
-    const isPasswordValid = useMemo(() => Object.values(passwordRequirements).every(Boolean), [passwordRequirements]);
+    const isPasswordValid = useMemo(() => checkPassword(newPassword), [newPassword]);
 
     // Campos do perfil
     const [firstName, setFirstName] = useState('');
@@ -252,7 +248,7 @@ export const ProfilePage: React.FC = () => {
         }
 
         if (!isPasswordValid) {
-            setMessage({ type: 'error', text: 'A senha não atende aos requisitos mínimos.' });
+            setMessage({ type: 'error', text: PASSWORD_RULES_MESSAGE });
             return;
         }
 
@@ -605,9 +601,10 @@ export const ProfilePage: React.FC = () => {
                                     value={newPassword}
                                     onChange={(e) => setNewPassword(e.target.value)}
                                     className="w-full px-4 py-2.5 border-2 border-slate-200 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-800/50 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-primary-500 transition-all pr-10"
-                                    placeholder="Mínimo 6 caracteres"
+                                    placeholder={PASSWORD_PLACEHOLDER}
                                     required
-                                    minLength={6}
+                                    minLength={PASSWORD_MIN_LENGTH}
+                                    autoComplete="new-password"
                                 />
                                 <button
                                     type="button"
@@ -618,26 +615,7 @@ export const ProfilePage: React.FC = () => {
                                 </button>
                             </div>
 
-                            {/* Password Requirements */}
-                            {newPassword.length > 0 && (
-                                <div className="mt-2 space-y-1">
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Requisitos:</p>
-                                    <div className="grid grid-cols-2 gap-1 text-xs">
-                                        <span className={passwordRequirements.minLength ? 'text-green-500' : 'text-slate-400'}>
-                                            {passwordRequirements.minLength ? '✓' : '○'} Mínimo 6 caracteres
-                                        </span>
-                                        <span className={passwordRequirements.hasLowercase ? 'text-green-500' : 'text-slate-400'}>
-                                            {passwordRequirements.hasLowercase ? '✓' : '○'} Letra minúscula
-                                        </span>
-                                        <span className={passwordRequirements.hasUppercase ? 'text-green-500' : 'text-slate-400'}>
-                                            {passwordRequirements.hasUppercase ? '✓' : '○'} Letra maiúscula
-                                        </span>
-                                        <span className={passwordRequirements.hasDigit ? 'text-green-500' : 'text-slate-400'}>
-                                            {passwordRequirements.hasDigit ? '✓' : '○'} Número
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
+                            <PasswordChecklist password={newPassword} />
                         </div>
 
                         <div>

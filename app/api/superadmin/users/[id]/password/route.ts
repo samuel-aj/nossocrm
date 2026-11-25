@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { safeErrorMessage } from '@/lib/security/safeError';
+import { weakPasswordMessage, zPassword } from '@/lib/security/passwordPolicy';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
@@ -14,7 +15,7 @@ import { UserRole } from '@/types/constants';
 type Ctx = { params: Promise<{ id: string }> };
 
 const BodySchema = z.object({
-  password: z.string().min(6, 'A senha precisa ter pelo menos 6 caracteres').max(72, 'Senha longa demais'),
+  password: zPassword,
 });
 
 function json<T>(body: T, status = 200): Response {
@@ -59,7 +60,9 @@ export async function POST(req: Request, ctx: Ctx) {
   if (!target) return json({ error: 'Usuário não encontrado' }, 404);
 
   const { error: updateError } = await admin.auth.admin.updateUserById(id, { password: parsed.data.password });
-  if (updateError) return json({ error: `Não foi possível alterar a senha: ${updateError.message}` }, 400);
+  if (updateError) {
+    return json({ error: weakPasswordMessage(updateError) ?? `Não foi possível alterar a senha: ${updateError.message}` }, 400);
+  }
 
   await logSuperAdminAction(admin, {
     actor_id: me.id,

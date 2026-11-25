@@ -4,6 +4,8 @@ import React, { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getErrorMessage } from '@/lib/utils/errorUtils'
+import { isPasswordValid as checkPassword } from '@/lib/security/passwordPolicy'
+import { PasswordChecklist } from '@/components/ui/PasswordChecklist'
 import { useAuth } from '@/context/AuthContext'
 import { Loader2, Building2, User, Lock, ArrowRight } from 'lucide-react'
 
@@ -65,13 +67,7 @@ export default function SetupPage() {
     }
   }, [router])
 
-  const passwordRequirements = {
-    minLength: password.length >= 6,
-    hasLowercase: /[a-z]/.test(password),
-    hasUppercase: /[A-Z]/.test(password),
-    hasDigit: /\d/.test(password),
-  }
-  const isPasswordValid = Object.values(passwordRequirements).every(Boolean)
+  const isPasswordValid = checkPassword(password)
   const passwordsMatch = password === confirmPassword && confirmPassword.length > 0
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -211,25 +207,7 @@ export default function SetupPage() {
                 />
               </div>
 
-              {password.length > 0 && (
-                <div id="password-requirements" className="mt-2 space-y-1">
-                  <p className="text-xs text-slate-500 dark:text-slate-400">Requisitos:</p>
-                  <div className="grid grid-cols-2 gap-1 text-xs">
-                    <span className={passwordRequirements.minLength ? 'text-green-500' : 'text-slate-400'}>
-                      {passwordRequirements.minLength ? '✓' : '○'} Mínimo 6 caracteres
-                    </span>
-                    <span className={passwordRequirements.hasLowercase ? 'text-green-500' : 'text-slate-400'}>
-                      {passwordRequirements.hasLowercase ? '✓' : '○'} Letra minúscula
-                    </span>
-                    <span className={passwordRequirements.hasUppercase ? 'text-green-500' : 'text-slate-400'}>
-                      {passwordRequirements.hasUppercase ? '✓' : '○'} Letra maiúscula
-                    </span>
-                    <span className={passwordRequirements.hasDigit ? 'text-green-500' : 'text-slate-400'}>
-                      {passwordRequirements.hasDigit ? '✓' : '○'} Número
-                    </span>
-                  </div>
-                </div>
-              )}
+              <PasswordChecklist id="password-requirements" password={password} />
             </div>
 
             <div>

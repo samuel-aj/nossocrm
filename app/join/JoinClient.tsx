@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getErrorMessage } from '@/lib/utils/errorUtils'
+import { PASSWORD_MIN_LENGTH, PASSWORD_PLACEHOLDER, validatePassword } from '@/lib/security/passwordPolicy'
+import { PasswordChecklist } from '@/components/ui/PasswordChecklist'
 import { Loader2, Mail, Lock, User, ArrowRight, AlertCircle } from 'lucide-react'
 
 /**
@@ -22,7 +24,9 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   const [loading, setLoading] = useState(false)
   const [validating, setValidating] = useState(true)
   const [inviteData, setInviteData] = useState<any>(null)
+  // Convite inválido (troca a tela inteira) x erro ao enviar (aparece no formulário).
   const [error, setError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     name: '',
@@ -76,12 +80,18 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
     if (!token) return
 
     if (formData.password !== formData.confirmPassword) {
-      setError('As senhas não coincidem. Verifique e tente novamente.')
+      setFormError('As senhas não coincidem. Verifique e tente novamente.')
+      return
+    }
+
+    const passwordProblem = validatePassword(formData.password)
+    if (passwordProblem) {
+      setFormError(passwordProblem)
       return
     }
 
     setLoading(true)
-    setError(null)
+    setFormError(null)
 
     try {
       const res = await fetch('/api/invites/accept', {
@@ -108,7 +118,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
       router.push('/dashboard')
     } catch (err: any) {
       console.error(err)
-      setError(getErrorMessage(err))
+      setFormError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -219,13 +229,16 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
                   type="password"
                   required
                   aria-required="true"
-                  minLength={6}
+                  minLength={PASSWORD_MIN_LENGTH}
                   className="block w-full pl-10 pr-3 py-2.5 border border-slate-300 dark:border-slate-700 rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm"
-                  placeholder="Mínimo 6 caracteres"
+                  autoComplete="new-password"
+                  aria-describedby="join-password-requirements"
+                  placeholder={PASSWORD_PLACEHOLDER}
                   value={formData.password}
                   onChange={e => setFormData({ ...formData, password: e.target.value })}
                 />
               </div>
+              <PasswordChecklist id="join-password-requirements" password={formData.password} />
             </div>
 
             <div>
@@ -241,7 +254,7 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
                   type="password"
                   required
                   aria-required="true"
-                  minLength={6}
+                  minLength={PASSWORD_MIN_LENGTH}
                   className={`block w-full pl-10 pr-3 py-2.5 border rounded-xl bg-slate-50 dark:bg-slate-900/50 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all sm:text-sm ${
                     formData.confirmPassword && formData.password !== formData.confirmPassword
                       ? 'border-red-400 dark:border-red-500'
@@ -257,10 +270,10 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
               )}
             </div>
 
-            {error && (
-              <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-xl">
+            {formError && (
+              <div role="alert" className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-500/20 rounded-xl">
                 <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
-                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>
               </div>
             )}
 

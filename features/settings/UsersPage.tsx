@@ -6,6 +6,7 @@ import { useToast } from '@/context/ToastContext';
 import ConfirmModal from '@/components/ConfirmModal';
 import { Loader2, UserPlus, Crown, Briefcase, KeyRound, Mail, Check, X, Sparkles, Clock, RefreshCw, Trash2, Link, Copy, CheckCircle2, KanbanSquare, Phone, Users as UsersIcon, Eye, EyeOff } from 'lucide-react';
 import { UserRole } from '@/types/constants';
+import { PASSWORD_HINT, PASSWORD_PLACEHOLDER, validatePassword } from '@/lib/security/passwordPolicy';
 import { useCRM } from '@/context/CRMContext';
 import {
     DEFAULT_ACTION_PERMISSIONS,
@@ -295,8 +296,9 @@ export const UsersPage: React.FC = () => {
             setError('Informe um email válido');
             return;
         }
-        if (newLoginPassword.length < 6) {
-            setError('A senha precisa ter pelo menos 6 caracteres');
+        const passwordProblem = validatePassword(newLoginPassword);
+        if (passwordProblem) {
+            setError(passwordProblem);
             return;
         }
         setSendingInvites(true);
@@ -783,11 +785,12 @@ export const UsersPage: React.FC = () => {
                                                 type="text"
                                                 value={newLoginPassword}
                                                 onChange={(e) => setNewLoginPassword(e.target.value)}
-                                                placeholder="Mínimo 6 caracteres"
+                                                placeholder={PASSWORD_PLACEHOLDER}
                                                 autoComplete="off"
                                                 className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
                                             />
                                         </div>
+                                        <p className="mt-2 text-xs text-slate-400">{PASSWORD_HINT}</p>
                                     </div>
                                 )}
 
@@ -956,7 +959,7 @@ const PasswordResetModal: React.FC<{ user: Profile; onClose: () => void }> = ({ 
     const [show, setShow] = useState(false);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const tooShort = password.length < 6;
+    const tooShort = validatePassword(password) !== null;
 
     const save = async () => {
         if (tooShort || saving) return;
@@ -1004,7 +1007,7 @@ const PasswordResetModal: React.FC<{ user: Profile; onClose: () => void }> = ({ 
                             type={show ? 'text' : 'password'}
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            placeholder="Mínimo 6 caracteres"
+                            placeholder={PASSWORD_PLACEHOLDER}
                             autoComplete="new-password"
                             autoFocus
                             className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-primary-500"
@@ -1018,7 +1021,7 @@ const PasswordResetModal: React.FC<{ user: Profile; onClose: () => void }> = ({ 
                             {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                     </div>
-                    <p className="mt-2 text-xs text-slate-400">A pessoa passa a entrar com essa senha. A senha antiga deixa de funcionar.</p>
+                    <p className="mt-2 text-xs text-slate-400">{PASSWORD_HINT} A pessoa passa a entrar com essa senha e a antiga deixa de funcionar.</p>
                     {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
 
                     <div className="mt-6 flex justify-end gap-3">

@@ -1,5 +1,6 @@
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { safeErrorMessage } from '@/lib/security/safeError';
+import { validatePassword, weakPasswordMessage } from '@/lib/security/passwordPolicy';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { logSuperAdminAction } from '@/lib/security/auditLog';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
@@ -137,9 +138,8 @@ export async function POST(req: Request) {
     if (!isActiveAccount && !adminPassword) {
       return json({ error: 'Senha é obrigatória para criar uma conta nova' }, 400);
     }
-    if (!isActiveAccount && adminPassword.length < 6) {
-      return json({ error: 'Senha deve ter pelo menos 6 caracteres' }, 400);
-    }
+    const passwordProblem = isActiveAccount ? null : validatePassword(adminPassword);
+    if (passwordProblem) return json({ error: passwordProblem }, 400);
   }
 
   // 1. Create organization
@@ -187,6 +187,8 @@ export async function POST(req: Request) {
     });
     if (updateError) {
       await admin.from('organizations').delete().eq('id', org.id);
+      const weak = weakPasswordMessage(updateError);
+      if (weak) return json({ error: weak }, 400);
       return json({ error: `Erro ao reaproveitar conta: ${updateError.message}` }, 500);
     }
     userId = existingAuthUser.id;
@@ -201,6 +203,8 @@ export async function POST(req: Request) {
     if (authError) {
       // Rollback org creation
       await admin.from('organizations').delete().eq('id', org.id);
+      const weak = weakPasswordMessage(authError);
+      if (weak) return json({ error: weak }, 400);
       return json({ error: `Erro ao criar usuário: ${authError.message}` }, 500);
     }
     userId = authData.user.id;
