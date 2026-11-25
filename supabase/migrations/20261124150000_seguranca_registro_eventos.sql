@@ -8,8 +8,8 @@
 --   2) registra sozinho, no banco, o que é gravado direto pelo navegador e por
 --      isso não passa por rota do servidor: webhooks (entrada e saída) e troca
 --      de papel de usuário (inclusive feita pelo SQL Editor);
---   3) dá ao servidor uma leitura dos acessos que o próprio Supabase Auth
---      registra (login, logout, troca e recuperação de senha);
+--   3) remove a função de leitura do histórico do Supabase Auth, criada na
+--      primeira versão e sem uso (o CRM grava os logins por conta própria);
 --   4) guarda os registros por 180 dias.
 --
 -- Não apaga dado nem muda regra das telas. Os gatilhos nunca bloqueiam a
@@ -161,40 +161,12 @@ BEGIN
   END IF;
 END $$;
 
--- 3) Acessos registrados pelo Supabase Auth -------------------------------------
--- Só o servidor do CRM chama (a rota confere que é super admin). Sem o
--- "token_refreshed", que é renovação automática de sessão e não interessa.
-CREATE OR REPLACE FUNCTION public.security_auth_events(p_since timestamptz, p_limit integer DEFAULT 100)
-RETURNS TABLE (id text, created_at timestamptz, action text, actor_id text, actor_email text, ip_address text)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = ''
-AS $$
-BEGIN
-  IF to_regclass('auth.audit_log_entries') IS NULL THEN
-    RETURN;
-  END IF;
-  BEGIN
-    RETURN QUERY EXECUTE $q$
-      SELECT e.id::text, e.created_at, e.payload->>'action', e.payload->>'actor_id',
-             e.payload->>'actor_username', e.ip_address::text
-      FROM auth.audit_log_entries e
-      WHERE e.created_at >= $1
-        AND e.payload->>'action' IN (
-          'login', 'logout', 'user_signedup', 'user_invited', 'invite_accepted', 'user_deleted',
-          'user_modified', 'user_recovery_requested', 'user_updated_password', 'user_repeated_signup',
-          'token_revoked', 'identity_unlinked'
-        )
-      ORDER BY e.created_at DESC
-      LIMIT $2
-    $q$ USING p_since, LEAST(GREATEST(COALESCE(p_limit, 100), 1), 200);
-  EXCEPTION WHEN insufficient_privilege OR undefined_column THEN
-    RETURN;
-  END;
-END $$;
-
-REVOKE ALL ON FUNCTION public.security_auth_events(timestamptz, integer) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.security_auth_events(timestamptz, integer) TO service_role;
+-- 3) Login -------------------------------------------------------------------------
+-- O login bem-sucedido e a senha recusada são gravados pelo próprio CRM
+-- (/api/security/login e /api/security/login-failed). A primeira versão deste
+-- arquivo criava uma função que lia o histórico do Supabase Auth, mas neste
+-- projeto esse histórico não é guardado no banco. Se ela existir, sai.
+DROP FUNCTION IF EXISTS public.security_auth_events(timestamptz, integer);
 
 -- 4) Retenção: 180 dias ----------------------------------------------------------
 DO $$

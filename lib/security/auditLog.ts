@@ -45,6 +45,7 @@ export type SecurityAction =
   | 'integration.zapsign.changed'
   | 'data.contacts.exported'
   | 'public_api.invalid_key'
+  | 'auth.login'
   | 'auth.login_failed';
 
 export type AuditSeverity = 'info' | 'warning' | 'critical';

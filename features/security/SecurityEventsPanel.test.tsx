@@ -71,13 +71,15 @@ it('os filtros são listas suspensas e refazem a busca', async () => {
   await userEvent.click(screen.getByRole('option', { name: 'Últimos 30 dias' }));
   await waitFor(() => expect(calls.some(u => u.includes('period=30d'))).toBe(true));
 
-  await userEvent.click(screen.getByRole('combobox', { name: 'Gravidade' }));
-  expect(screen.getByText('Inclui os informativos')).toBeInTheDocument();
-  await userEvent.click(screen.getByRole('option', { name: 'Tudo' }));
-  await waitFor(() => expect(calls[calls.length - 1]).not.toContain('severity='));
+  await userEvent.click(screen.getByRole('combobox', { name: 'Mostrar' }));
+  expect(screen.getByText('Quem entrou e senhas recusadas')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('option', { name: 'Logins' }));
+  await waitFor(() => expect(calls[calls.length - 1]).toContain('type=logins'));
+  expect(calls[calls.length - 1]).not.toContain('severity=');
 
-  await userEvent.click(screen.getByRole('tab', { name: 'Acessos' }));
-  await waitFor(() => expect(calls[calls.length - 1]).toContain('source=auth'));
-  expect(screen.queryByRole('combobox', { name: 'Gravidade' })).toBeNull();
-  expect(await screen.findByText(/Nenhum acesso registrado/)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('combobox', { name: 'Mostrar' }));
+  await userEvent.click(screen.getByRole('option', { name: 'Tudo' }));
+  await waitFor(() => expect(calls[calls.length - 1]).not.toContain('type='));
+  expect(calls[calls.length - 1]).not.toContain('severity=');
+  expect(screen.queryByRole('tab')).toBeNull();
 });

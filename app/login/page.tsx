@@ -45,6 +45,8 @@ export default function LoginPage() {
                 }).catch(() => {})
                 throw error
             }
+            // Acesso bem-sucedido também fica no registro (usuário, hora e IP).
+            void fetch('/api/security/login', { method: 'POST', keepalive: true }).catch(() => {})
             router.push('/select-org')
         } catch (err) {
             setError(getErrorMessage(err))

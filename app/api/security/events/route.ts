@@ -7,9 +7,8 @@
  *
  * Filtros: ?period=24h|7d|30d|90d  ?org=<uuid>
  *          ?severity=info|warning|critical|important (important = atenção + crítico)
+ *          ?type=logins (só login realizado e senha recusada)
  *          ?before=<ISO> (página seguinte)
- *          ?source=auth  -> acessos registrados pelo Supabase Auth (login,
- *                           logout, troca/recuperação de senha)
  */
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import { safeErrorMessage } from '@/lib/security/safeError';
@@ -27,6 +26,7 @@ const PERIOD_MS: Record<string, number> = {
   '90d': 90 * 24 * 3600_000,
 };
 const SEVERITIES = new Set(['info', 'warning', 'critical']);
+const LOGIN_ACTIONS = ['auth.login', 'auth.login_failed'];
 
 function json<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -49,15 +49,6 @@ type AuditRow = {
   user_agent: string | null;
 };
 
-type AuthRow = {
-  id: string;
-  created_at: string;
-  action: string | null;
-  actor_id: string | null;
-  actor_email: string | null;
-  ip_address: string | null;
-};
-
 type Person = { id: string; name: string | null; email: string | null };
 type Org = { id: string; name: string | null };
 
@@ -77,27 +68,6 @@ export async function GET(req: Request) {
   const since = new Date(Date.now() - PERIOD_MS[period]).toISOString();
   const admin = createStaticAdminClient();
 
-  if (url.searchParams.get('source') === 'auth') {
-    const { data, error } = await admin.rpc('security_auth_events', { p_since: since, p_limit: PAGE });
-    if (error) return json({ error: safeErrorMessage(error, 'Não foi possível ler os acessos.') }, 500);
-    const rows = (data ?? []) as AuthRow[];
-    return json({
-      events: rows.map(r => ({
-        id: r.id,
-        created_at: r.created_at,
-        action: `auth.${r.action || 'desconhecido'}`,
-        severity: 'info',
-        actor: r.actor_id || r.actor_email ? { id: r.actor_id, name: null, email: r.actor_email } : null,
-        organization: null,
-        resource_type: 'auth',
-        details: {},
-        ip: r.ip_address,
-        user_agent: null,
-      })),
-      hasMore: false,
-    });
-  }
-
   const severity = url.searchParams.get('severity') || '';
   const org = url.searchParams.get('org') || '';
   const before = url.searchParams.get('before') || '';
@@ -109,7 +79,8 @@ export async function GET(req: Request) {
     .order('created_at', { ascending: false })
     .limit(PAGE + 1);
   const orgFilter = org && isValidUUID(org) ? org : null;
-  if (severity === 'important') query = query.in('severity', ['warning', 'critical']);
+  if (url.searchParams.get('type') === 'logins') query = query.in('action', LOGIN_ACTIONS);
+  else if (severity === 'important') query = query.in('severity', ['warning', 'critical']);
   else if (SEVERITIES.has(severity)) query = query.eq('severity', severity);
   if (orgFilter) query = query.eq('organization_id', orgFilter);
   if (before && !Number.isNaN(Date.parse(before))) query = query.lt('created_at', new Date(before).toISOString());

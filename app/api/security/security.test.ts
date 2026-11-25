@@ -24,6 +24,7 @@ vi.mock('@/lib/supabase/server', () => {
       order: () => b,
       limit: () => b,
       single: async () => ({ data: state.user ? { id: state.user.id, role: state.role } : null, error: null }),
+      maybeSingle: async () => ({ data: state.user ? { organization_id: 'o1' } : null, error: null }),
       insert: async (row: Record<string, unknown>) => {
         state.inserts.push(row);
         return { error: null };
@@ -47,6 +48,7 @@ vi.mock('@/lib/supabase/server', () => {
 
 import { GET } from './events/route';
 import { POST } from './login-failed/route';
+import { POST as LOGIN } from './login/route';
 import { resetAuditThrottle } from '@/lib/security/auditLog';
 
 describe('GET /api/security/events', () => {
@@ -96,6 +98,11 @@ describe('GET /api/security/events', () => {
     expect(state.filters).toContainEqual(['eq', 'severity', 'warning']);
     expect(state.filters.some(f => f[1] === 'organization_id' && f[0] === 'eq')).toBe(false);
   });
+
+  it('type=logins filtra só login realizado e senha recusada', async () => {
+    await GET(new Request('https://crm.test/api/security/events?type=logins&severity=critical'));
+    expect(state.filters).toContainEqual(['in', 'action', ['auth.login', 'auth.login_failed']]);
+  });
 });
 
 describe('POST /api/security/login-failed', () => {
@@ -130,6 +137,39 @@ describe('POST /api/security/login-failed', () => {
     await call('a@b.com', '203.0.113.52');
     await call('c@d.com', '203.0.113.52');
     await call('sem-arroba', '203.0.113.53');
+    expect(state.inserts).toHaveLength(1);
+  });
+});
+
+describe('POST /api/security/login', () => {
+  const call = (ip = '203.0.113.60') =>
+    LOGIN(new Request('https://crm.test/api/security/login', { method: 'POST', headers: { 'x-forwarded-for': ip } }));
+
+  beforeEach(() => {
+    state.inserts = [];
+    state.user = { id: 'u1' };
+    resetAuditThrottle();
+  });
+
+  it('grava o login de quem tem sessão, com organização e IP', async () => {
+    expect((await call()).status).toBe(204);
+    expect(state.inserts).toHaveLength(1);
+    expect(state.inserts[0]).toMatchObject({
+      action: 'auth.login',
+      severity: 'info',
+      user_id: 'u1',
+      organization_id: 'o1',
+      ip_address: '203.0.113.60',
+    });
+  });
+
+  it('não grava sem sessão nem repete no mesmo minuto', async () => {
+    state.user = null;
+    await call();
+    expect(state.inserts).toHaveLength(0);
+    state.user = { id: 'u1' };
+    await call();
+    await call();
     expect(state.inserts).toHaveLength(1);
   });
 });
