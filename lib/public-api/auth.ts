@@ -1,9 +1,10 @@
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { logSecurityEvent, requestMeta, shouldLogThrottled } from '@/lib/security/auditLog';
+import { LIMITS, logRateLimitExceeded, rateLimit, rateLimitHeaders, rateLimitMessage, rateLimitPeek, type RateLimitResult } from '@/lib/security/rateLimit';
 
 export type PublicApiAuthResult =
   | { ok: true; organizationId: string; organizationName: string; apiKeyId: string; apiKeyPrefix: string }
-  | { ok: false; status: number; body: { error: string; code?: string } };
+  | { ok: false; status: number; body: { error: string; code?: string; retry_after?: number }; headers?: Record<string, string> };
 
 function safePath(url: string): string {
   try {
@@ -20,10 +21,29 @@ function getAnonSupabase() {
   return createSupabaseClient(url, anon);
 }
 
+function limited(result: RateLimitResult): PublicApiAuthResult {
+  return {
+    ok: false,
+    status: 429,
+    body: { error: rateLimitMessage(result), code: 'RATE_LIMITED', retry_after: result.retryAfterSeconds },
+    headers: rateLimitHeaders(result),
+  };
+}
+
 export async function authPublicApi(request: Request): Promise<PublicApiAuthResult> {
   const token = request.headers.get('x-api-key') || '';
   if (!token.trim()) {
     return { ok: false, status: 401, body: { error: 'Missing X-Api-Key', code: 'AUTH_MISSING' } };
+  }
+
+  // Quem já errou a chave vezes demais neste minuto nem chega ao banco.
+  const ip = requestMeta(request).ip ?? 'sem-ip';
+  const ipKey = `public_api_invalid:${ip}`;
+  const blocked = rateLimitPeek(ipKey, LIMITS.publicApiInvalidPerIp());
+  if (blocked) {
+    // Sinal de tentativa de adivinhar chave: fica no painel de segurança.
+    await logRateLimitExceeded({ scope: 'public_api_invalid', id: ip, limit: blocked.limit, request }, blocked);
+    return limited(blocked);
   }
 
   const sb = getAnonSupabase();
@@ -55,6 +75,7 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     // por minuto por IP, para não virar porta de sobrecarga do banco. Falha do
     // próprio banco (error) não é tentativa indevida e não é registrada.
     if (!error) {
+      rateLimit(ipKey, LIMITS.publicApiInvalidPerIp());
       const { ip } = requestMeta(request);
       if (shouldLogThrottled(`public_api.invalid_key:${ip ?? 'sem-ip'}`)) {
         await logSecurityEvent({
@@ -66,6 +87,16 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
       }
     }
     return { ok: false, status: 401, body: { error: 'Invalid API key', code: 'AUTH_INVALID' } };
+  }
+
+  // Limite por chave de API: contém integração em laço sem afetar as outras.
+  const usage = rateLimit(`public_api:${row.api_key_id}`, LIMITS.publicApiPerKey());
+  if (!usage.ok) {
+    await logRateLimitExceeded(
+      { scope: 'public_api', id: row.api_key_id, limit: usage.limit, request, organizationId: row.organization_id },
+      usage,
+    );
+    return limited(usage);
   }
 
   return {

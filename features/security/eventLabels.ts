@@ -33,6 +33,7 @@ const LABELS: Record<string, string> = {
   'public_api.invalid_key': 'Chave de API inválida usada',
   'auth.login_failed': 'Senha recusada no login',
   'auth.login': 'Login realizado',
+  'rate_limit.exceeded': 'Limite de requisições estourado',
 };
 
 export function eventLabel(action: string): string {

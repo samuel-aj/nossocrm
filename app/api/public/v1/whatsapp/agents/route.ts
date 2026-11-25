@@ -15,7 +15,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const sb = createStaticAdminClient();
   const { data, error } = await sb

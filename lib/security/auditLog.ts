@@ -46,6 +46,7 @@ export type SecurityAction =
   | 'data.contacts.exported'
   | 'public_api.invalid_key'
   | 'auth.login'
+  | 'rate_limit.exceeded'
   | 'auth.login_failed';
 
 export type AuditSeverity = 'info' | 'warning' | 'critical';

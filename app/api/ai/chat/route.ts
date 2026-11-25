@@ -2,6 +2,7 @@
 // Full integration with AI SDK v6 ToolLoopAgent + createAgentUIStreamResponse
 
 import { createAgentUIStreamResponse, UIMessage } from 'ai';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { createCRMAgent } from '@/lib/ai/crmAgent';
 import { createClient, createStaticAdminClient } from '@/lib/supabase/server';
 import type { CRMCallOptions } from '@/types/ai';
@@ -94,6 +95,9 @@ export async function POST(req: Request) {
     if (!user) {
         return new Response('Unauthorized', { status: 401 });
     }
+    // Cada mensagem gasta a chave de IA da organização: limite por usuário.
+    const limited = await enforceRateLimit({ scope: 'ai', id: user.id, limit: LIMITS.aiPerUser(), request: req, actorId: user.id });
+    if (limited) return limited;
 
     // 2. Get profile with organization + role (RBAC)
     const { data: profile } = await supabase

@@ -16,6 +16,8 @@ export default defineConfig({
       'lib/security/safeError.test.ts',
       'features/settings/components/LifecycleSettingsModal.test.tsx',
       'lib/security/auditLog.test.ts',
+      'lib/security/rateLimit.test.ts',
+      'lib/public-api/auth.test.ts',
       'features/security/eventLabels.test.ts',
       'features/security/SecurityEventsPanel.test.tsx',
       'app/api/security/security.test.ts',

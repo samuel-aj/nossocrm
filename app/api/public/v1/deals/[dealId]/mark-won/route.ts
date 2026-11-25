@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 
 export async function POST(request: Request, ctx: { params: Promise<{ dealId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { dealId } = await ctx.params;
   if (!isValidUUID(dealId)) {

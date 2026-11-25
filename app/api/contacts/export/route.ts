@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { createClient } from '@/lib/supabase/server';
@@ -59,6 +60,9 @@ export async function GET(req: Request) {
     if (!me?.organization_id) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
     const scoped = await withTabOrg(me);
     if (!scoped) return NextResponse.json({ error: 'Acesso negado a esta organização' }, { status: 403 });
+    // Exportar varre a base inteira: poucos pedidos por minuto por usuário.
+    const limited = await enforceRateLimit({ scope: 'export', id: user.id, limit: LIMITS.exportPerUser(), request: req, actorId: user.id, organizationId: scoped.organization_id });
+    if (limited) return limited;
 
     const chunkSize = 1000;
     let page = 0;
