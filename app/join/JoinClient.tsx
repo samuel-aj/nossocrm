@@ -124,7 +124,8 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg p-4">
+      // Mesmo esquema do login: com o aviso de instalação visível, reserva o topo e o aviso rola com a tela.
+      <div data-install-banner-space className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg p-4 [body:has([data-install-banner])_&]:pt-40">
         <div className="max-w-md w-full bg-white dark:bg-dark-card border border-slate-200 dark:border-white/10 rounded-2xl p-8 text-center shadow-xl">
           <div className="h-16 w-16 bg-red-100 dark:bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
             <AlertCircle className="h-8 w-8 text-red-500" />
@@ -143,7 +144,8 @@ export function JoinClient({ token: tokenProp }: { token?: string | null }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg relative overflow-hidden p-4">
+    // Mesmo esquema do login: com o aviso de instalação visível, reserva o topo e o aviso rola com a tela.
+    <div data-install-banner-space className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-dark-bg relative overflow-hidden p-4 [body:has([data-install-banner])_&]:pt-40">
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
         <div className="absolute -top-[20%] -right-[10%] w-[50%] h-[50%] bg-primary-500/20 rounded-full blur-[120px]" />
         <div className="absolute top-[40%] -left-[10%] w-[40%] h-[40%] bg-blue-500/20 rounded-full blur-[100px]" />

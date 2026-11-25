@@ -4,15 +4,15 @@ import { createHash, webcrypto } from 'node:crypto';
 import { runInNewContext } from 'node:vm';
 import { expect, it, vi } from 'vitest';
 
-function worker() {
+function worker(origin = 'https://crm.test') {
   const listeners: Record<string, (e: any) => void> = {};
   const cache = { add: vi.fn(), put: vi.fn().mockResolvedValue(undefined), match: vi.fn(), keys: vi.fn() };
   const caches = { has: vi.fn(), open: vi.fn().mockResolvedValue(cache), match: vi.fn(), keys: vi.fn().mockResolvedValue(['nossocrm-shell-v3', 'nossocrm-shell-v4', 'another-app']), delete: vi.fn() };
   const fetch = vi.fn();
   const showNotification = vi.fn(), openWindow = vi.fn();
-  runInNewContext(readFileSync('public/sw.js', 'utf8'), { self: { location: { origin: 'https://crm.test' }, addEventListener: (name: string, fn: any) => { listeners[name] = fn; }, registration: { showNotification }, clients: { claim: vi.fn(), openWindow }, skipWaiting: vi.fn() }, crypto: webcrypto, TextEncoder, Uint8Array, atob, caches, fetch, URL, Response });
+  runInNewContext(readFileSync('public/sw.js', 'utf8'), { self: { location: { origin, hostname: new URL(origin).hostname }, addEventListener: (name: string, fn: any) => { listeners[name] = fn; }, registration: { showNotification }, clients: { claim: vi.fn(), openWindow }, skipWaiting: vi.fn() }, crypto: webcrypto, TextEncoder, Uint8Array, atob, caches, fetch, URL, Response });
   function request(path: string, options = {}) {
-    const event = { request: { method: 'GET', mode: 'cors', headers: new Headers(), url: new URL(path, 'https://crm.test').href, ...options }, respondWith: vi.fn(), waitUntil: vi.fn() };
+    const event = { request: { method: 'GET', mode: 'cors', headers: new Headers(), url: new URL(path, origin).href, ...options }, respondWith: vi.fn(), waitUntil: vi.fn() };
     listeners.fetch(event);
     return event;
   }
@@ -103,6 +103,20 @@ it('reuses immutable chunks without re-downloading and never caches 404s', async
   w.fetch.mockResolvedValueOnce(new Response('missing', { status: 404 }));
   await w.request('/_next/static/missing.js').respondWith.mock.calls[0][0];
   expect(w.cache.put).not.toHaveBeenCalled();
+});
+it('never serves chunks from the cache on a local development host, where files change without being renamed', async () => {
+  for (const origin of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000', 'http://crm.localhost:3000']) {
+    const w = worker(origin);
+    expect(w.request('/_next/static/chunks/app.js').respondWith, origin).not.toHaveBeenCalled();
+    expect(w.caches.open, origin).not.toHaveBeenCalled();
+  }
+  for (const origin of ['https://crm.test', 'https://localhost.example.com', 'https://notlocalhost']) {
+    const w = worker(origin); w.cache.match.mockResolvedValueOnce(new Response('chunk'));
+    const event = w.request('/_next/static/chunks/app.js');
+    expect(event.respondWith, origin).toHaveBeenCalled();
+    expect(await (await event.respondWith.mock.calls[0][0]).text(), origin).toBe('chunk');
+    expect(w.fetch, origin).not.toHaveBeenCalled();
+  }
 });
 it('removes only obsolete CRM shell caches', async () => {
   const w = worker(); const event = { waitUntil: vi.fn() }; w.listeners.activate(event);

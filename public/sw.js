@@ -3,6 +3,9 @@
 // must never survive a deployment in this cache.
 const CACHE_NAME = 'nossocrm-shell-v4';
 const OFFLINE_URL = '/offline.html';
+// `next dev` rebuilds /_next/static/ files without renaming them, so a cached copy would keep
+// running the code from before the last edit. Local development always goes to the network.
+const LOCAL_DEV = /^(localhost|127\.0\.0\.1|\[::1\])$|\.localhost$/.test(self.location.hostname);
 const PUSH_CONSENT_CACHE = 'nossocrm-push-consent-v1';
 const uuid = /^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i;
 
@@ -106,6 +109,7 @@ self.addEventListener('fetch', event => {
       (await caches.match(OFFLINE_URL)) || Response.error()));
     return;
   }
+  if (LOCAL_DEV) return;
   // Explicit allowlist excludes route prefetches, API avatars and signed media.
   if (!url.pathname.startsWith('/_next/static/') || url.searchParams.has('_rsc') || req.headers.get('RSC')) return;
   event.respondWith((async () => {
