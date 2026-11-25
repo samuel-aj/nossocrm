@@ -18,7 +18,7 @@ import { normalizeLeadSource, readDbLeadSource } from '@/lib/deals/leadSource';
 
 import { supabase } from './client';
 import { Deal, DealItem, OrganizationId } from '@/types';
-import { sanitizeUUID, requireUUID, isValidUUID } from './utils';
+import { sanitizeUUID, requireUUID, isValidUUID, readLinkId, UNREADABLE_CONTACT_MESSAGE, UNREADABLE_DEAL_MESSAGE } from './utils';
 import { DealPriority } from '@/types/constants';
 
 // =============================================================================
@@ -341,6 +341,12 @@ export const dealsService = {
         return { data: null, error: e as Error };
       }
 
+      // Contato preenchido e ilegível (ainda sendo salvo, por exemplo) é erro:
+      // gravar null no lugar criaria o lead sem contato, em silêncio. Vazio
+      // segue sem contato. O update é mais rígido: confere também a versão do id.
+      const contact = readLinkId(deal.contactId);
+      if (!contact.ok) return { data: null, error: new Error(UNREADABLE_CONTACT_MESSAGE) };
+
       // organization_id é obrigatório no banco. Se não vier do caller, inferimos pelo board.
       // (Evita deals com organization_id NULL que somem de ferramentas e quebram isolamento multi-tenant.)
       let organizationId: string | null = sanitizeUUID((deal as any).organizationId);
@@ -396,7 +402,7 @@ export const dealsService = {
         priority: deal.priority || DealPriority.MEDIUM,
         board_id: boardId,
         stage_id: sanitizeUUID(stageId),
-        contact_id: sanitizeUUID(deal.contactId),
+        contact_id: contact.id,
         client_company_id: sanitizeUUID(deal.clientCompanyId || deal.companyId),
         tags: deal.tags || [],
         custom_fields: deal.customFields || {},
@@ -550,11 +556,15 @@ export const dealsService = {
       if (!supabase) {
         return { data: null, error: new Error('Supabase não configurado') };
       }
+      // Id preenchido e ilegível (lead ainda sendo salvo, por exemplo) é erro:
+      // gravar null no lugar deixaria o item sem lead.
+      const deal = readLinkId(dealId);
+      if (!deal.ok) return { data: null, error: new Error(UNREADABLE_DEAL_MESSAGE) };
       const orgId = await getCurrentOrganizationId();
       const { data, error } = await supabase
         .from('deal_items')
         .insert({
-          deal_id: sanitizeUUID(dealId),
+          deal_id: deal.id,
           organization_id: orgId,
           product_id: sanitizeUUID(item.productId),
           name: item.name,
@@ -603,11 +613,16 @@ export const dealsService = {
       if (updates.quantity !== undefined) patch.quantity = updates.quantity;
       if (Object.keys(patch).length === 0) return { error: null };
 
+      // Id preenchido e ilegível não pode virar o filtro "deal_id = null":
+      // devolve erro antes do banco.
+      const deal = readLinkId(dealId);
+      if (!deal.ok) return { error: new Error(UNREADABLE_DEAL_MESSAGE) };
+
       const { error } = await supabase
         .from('deal_items')
         .update(patch)
         .eq('id', itemId)
-        .eq('deal_id', sanitizeUUID(dealId));
+        .eq('deal_id', deal.id);
 
       if (error) return { error };
 

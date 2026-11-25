@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isValidUUID, requireUUID, sanitizeUUID, sanitizeUUIDs } from './utils';
+import { isValidUUID, readLinkId, requireUUID, sanitizeUUID, sanitizeUUIDs } from './utils';
 
 // Mesmo formato dos ids que o lead automático do WhatsApp grava (versão 8).
 const AUTO_LEAD_ID = 'a1b2c3d4-e5f6-8a7b-9c0d-1e2f3a4b5c6d';
@@ -86,6 +86,78 @@ describe('sanitizeUUIDs', () => {
       ownerId: null,
       name: 'Teste',
     });
+  });
+});
+
+describe('readLinkId', () => {
+  it.each([
+    ['texto vazio', ''],
+    ['só espaços', '   '],
+    ['null', null],
+    ['undefined', undefined],
+  ])('trata %s como "sem vínculo"', (_label, value) => {
+    expect(readLinkId(value)).toEqual({ ok: true, id: null });
+  });
+
+  it('devolve o id como veio, seja do banco (versão 4) ou do lead automático (versão 8)', () => {
+    expect(readLinkId(DATABASE_ID)).toEqual({ ok: true, id: DATABASE_ID });
+    expect(readLinkId(AUTO_LEAD_ID)).toEqual({ ok: true, id: AUTO_LEAD_ID });
+    expect(readLinkId(AUTO_LEAD_ID.toUpperCase())).toEqual({ ok: true, id: AUTO_LEAD_ID.toUpperCase() });
+  });
+
+  // A tela não pode recusar um id que o banco gravou: aqui só o formato conta.
+  it.each([
+    ['versão 9', withVersion('9')],
+    ['versão 0', withVersion('0')],
+    ['variante c', withVariant('c')],
+    ['UUID nulo', '00000000-0000-0000-0000-000000000000'],
+    ['UUID máximo', 'ffffffff-ffff-ffff-ffff-ffffffffffff'],
+  ])('deixa passar %s, que isValidUUID recusa, para o banco decidir', (_label, value) => {
+    expect(isValidUUID(value)).toBe(false);
+    expect(readLinkId(value)).toEqual({ ok: true, id: value });
+  });
+
+  it.each([
+    ['id provisório de registro ainda sendo salvo', 'temp-1732540000000'],
+    ['id de negócio fictício da tela', `placeholder-${DATABASE_ID}`],
+    ['texto "undefined"', 'undefined'],
+    ['texto "null"', 'null'],
+    ['texto solto', 'abc'],
+    ['sem hifens', DATABASE_ID.replace(/-/g, '')],
+    ['com espaço em volta', ` ${DATABASE_ID} `],
+    ['com quebra de linha no fim', `${DATABASE_ID}\n`],
+    ['com filtro extra colado', `${DATABASE_ID},id.neq.x`],
+    ['com caractere fora do hexadecimal', 'g1b2c3d4-e5f6-8a7b-9c0d-1e2f3a4b5c6d'],
+  ])('recusa %s em vez de trocar por null', (_label, value) => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(readLinkId(value)).toEqual({ ok: false });
+  });
+
+  it.each([123, 0, true, {}, []])('recusa o que não é texto (%j)', value => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(readLinkId(value)).toEqual({ ok: false });
+  });
+
+  it('deixa aviso no console só quando recusa, com o valor recusado', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    readLinkId('');
+    readLinkId(null);
+    readLinkId(DATABASE_ID);
+    expect(warn).not.toHaveBeenCalled();
+
+    readLinkId('temp-1732540000000');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('temp-1732540000000');
+  });
+
+  it('recusa sem lançar o valor que nem pode virar texto', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const unprintable = { toString: () => { throw new Error('sem texto'); } };
+
+    expect(readLinkId(Object.create(null))).toEqual({ ok: false });
+    expect(readLinkId(unprintable)).toEqual({ ok: false });
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0][0]).toContain('object');
   });
 });
 
