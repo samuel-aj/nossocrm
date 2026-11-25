@@ -1,0 +1,30 @@
+# Confere se cada publicação na main veio com a sua entrada no CHANGELOG.md.
+# Não bloqueia a publicação (a Vercel publica do mesmo jeito): só deixa visível,
+# com um X vermelho no commit ou no PR, quando o registro ficou faltando.
+name: Registro de alterações
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Registro de alterações
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Conferir o CHANGELOG.md
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          TITLE: ${{ github.event.pull_request.title || github.event.head_commit.message }}
+        run: node scripts/check-changelog.mjs

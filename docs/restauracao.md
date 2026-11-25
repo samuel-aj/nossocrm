@@ -21,6 +21,8 @@ npm run checkpoint -- --list          # lista os pontos existentes
 
 A etiqueta aponta para o commit que está em produção naquele momento. Se a publicação nova der problema, é para ela que se volta.
 
+Toda publicação também ganha a sua entrada no [CHANGELOG.md](../CHANGELOG.md), com o nome da etiqueta criada aqui.
+
 Se a publicação inclui SQL, ela vai acompanhada de um arquivo `docs/<assunto>-rollback.sql`. O cabeçalho do arquivo diz quando usar e se o SQL roda antes ou depois de voltar o código. Acrescente a linha na tabela da seção 4.
 
 ## 2. Voltar o código

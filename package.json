@@ -16,7 +16,8 @@
     "test:notifications": "vitest run --config vitest.notifications.config.ts",
     "smoke:integrations": "node scripts/smoke-integrations.mjs",
     "smoke:deals": "node scripts/smoke-deals.mjs",
-    "checkpoint": "node scripts/checkpoint.mjs"
+    "checkpoint": "node scripts/checkpoint.mjs",
+    "changelog:check": "node scripts/check-changelog.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "3.0.1",
