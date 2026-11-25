@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LogOut } from 'lucide-react';
@@ -36,7 +37,9 @@ export function NavigationRail({ onOpenMore }: NavigationRailProps) {
     >
       <div className="flex flex-col items-center gap-2 py-4">
         <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-          <img src="/logo-aj-v2.png" alt={officeName} className="w-full h-full object-contain" />
+          {/* Símbolo da marca: violeta no tema claro, lavanda no escuro */}
+          <Image src="/logo-aj-simbolo-violeta.svg" alt={officeName} width={28} height={28} className="dark:hidden" />
+          <Image src="/logo-aj-simbolo-lavanda.svg" alt={officeName} width={28} height={28} className="hidden dark:block" />
         </div>
       </div>
 
