@@ -90,6 +90,9 @@ scripts/*
 !scripts/test-wa-agent-connection-db.mjs
 !scripts/test-mcp-whatsapp-db.mjs
 !scripts/mcp-upload-pdf.mjs
+!scripts/checkpoint.mjs
+!scripts/check-changelog.mjs
+!scripts/check-changelog.selftest.mjs
 
 # Test documentation (test code stays, docs are local)
 test/*.md
