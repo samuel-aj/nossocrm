@@ -14,7 +14,7 @@ beforeAll(() => {
   HTMLElement.prototype.scrollIntoView = () => {};
 });
 
-it('permite ao escritório confirmar e remover a inscrição em Geral', async () => {
+it('permite ao escritório confirmar e remover a inscrição', async () => {
   const saved = { id: 'fake', professionalName: 'Ana Exemplo', state: 'MS', number: '12345' };
   let confirmed = false;
   const api = vi.fn(async (_endpoint: string, init?: RequestInit) => {

@@ -76,6 +76,7 @@ A restauração não traz de volta arquivos apagados do Storage (seção 5).
 
 | Etiqueta | O que entrou depois dela | SQL de desfazer |
 |---|---|---|
+| `prod-pre-dados-encerramento-20261126` | Dados obrigatórios para a preparação do contrato | `docs/dados-encerramento-rollback.sql`, antes do código |
 | `prod-pre-zapsign` | Integração ZapSign | `docs/zapsign-rollback.sql` |
 | `prod-pre-seguranca-p2` | Segurança parte 2 | `docs/seguranca-p2-rollback.sql` |
 | `prod-pre-seg-eventos` | Registro de eventos de segurança | `docs/seguranca-eventos-rollback.sql` |

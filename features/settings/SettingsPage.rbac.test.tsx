@@ -154,6 +154,17 @@ describe('SettingsPage RBAC', () => {
     expect(screen.getByRole('heading', { name: 'Webhooks (Integrações)' })).toBeInTheDocument()
   })
 
+  it.each(['admin', 'super_admin'])('Geral mostra o escritório sem o formulário da OAB para %s', role => {
+    useAuthMock.mockReturnValue({
+      profile: { role, organization_id: 'org-teste', organization_name: 'Escritório de teste' },
+    } as ReturnType<typeof useAuth>)
+    render(<QueryClientProvider client={new QueryClient()}><SettingsPage /></QueryClientProvider>)
+    expect(screen.getByRole('tab', { name: 'Geral', selected: true })).toBeVisible()
+    expect(screen.getByText('Escritório de teste')).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Inscrições da OAB' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Confirmar inscrição' })).not.toBeInTheDocument()
+  })
+
   it('vendedor não vê seções de configuração do sistema', () => {
     useAuthMock.mockReturnValue({
       profile: { role: 'vendedor' },

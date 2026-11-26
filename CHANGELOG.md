@@ -35,6 +35,31 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 - **Quem:** pedido de um escritório cliente, Claude Code fez (PR #89).
 - **Banco:** sem SQL.
 - **Para voltar:** `prod-pre-frase-retorno`.
+### 26/11/2026 · Conferência dos dados antes de preparar um contrato
+- **Tipo:** Correção
+- **O que mudou:** Em resultados configurados para exigir dados, o agente guarda o que o cliente já informou e pergunta apenas o que falta. A equipe recebe uma tarefa de revisão se houver falha ao atualizar o negócio ou preparar o documento.
+- **Por quê:** A equipe precisa receber os dados completos antes de orientar a assinatura.
+- **Quem:** Samuel solicitou e Codex implementou.
+- **Banco:** configuração do resultado do agente, sem mudança na estrutura. Para desfazer, use `docs/dados-encerramento-rollback.sql`.
+- **Para voltar:** etiqueta `prod-pre-dados-encerramento-20261126`.
+
+### 26/11/2026 · Cadastro da OAB somente em Conhecimento
+
+- **Tipo:** Melhoria
+- **O que mudou:** O administrador agora encontra o cadastro das inscrições da OAB exclusivamente na aba Conhecimento do editor de agentes. As inscrições já confirmadas continuam disponíveis para os agentes do escritório.
+- **Por quê:** Concentrar o cadastro no local em que o escritório configura as informações que a IA pode usar.
+- **Quem:** Samuel pediu, Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-oab-somente-conhecimento-20261126`.
+
+### 26/11/2026 · Inscrições da OAB na aba Conhecimento dos agentes
+
+- **Tipo:** Melhoria
+- **O que mudou:** Ao editar um agente, o administrador encontra as inscrições da OAB entre a base de conhecimento e as mídias. É o mesmo cadastro do escritório disponível em Configurações → Geral.
+- **Por quê:** Permitir que o escritório confira quais números da OAB seus agentes podem informar enquanto configura o atendimento.
+- **Quem:** Samuel pediu, Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-oab-conhecimento-20261126`.
 
 ### 26/11/2026 · Registro das decisões de segurança
 - **Tipo:** Infraestrutura

@@ -608,7 +608,8 @@ export const KnowledgePanel: React.FC<{
   /** Salva o agente (para liberar os uploads de um agente novo) */
   onRequestSave: () => void;
   saving: boolean;
-}> = ({ agentId, onInsertMedia, onRenameMedia, onRequestSave, saving }) => {
+  children?: React.ReactNode;
+}> = ({ agentId, onInsertMedia, onRenameMedia, onRequestSave, saving, children }) => {
   const { showToast } = useToast();
   const docsQ = useWaAgentDocuments(agentId);
   const mediaQ = useWaAgentMedia(agentId);
@@ -708,21 +709,24 @@ export const KnowledgePanel: React.FC<{
 
   if (!agentId) {
     return (
-      <Panel
-        title="Base de conhecimento"
-        icon={<BookOpen size={16} />}
-        description="Documentos que o agente consulta e mídias que ele pode enviar na conversa."
-      >
-        <Notice tone="amber">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>Salve o agente antes de enviar documentos e mídias. Depois de salvar, você continua aqui no editor.</span>
-            <button type="button" className={BTN_PRIMARY} onClick={onRequestSave} disabled={saving}>
-              {saving ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
-              Salvar agora
-            </button>
-          </div>
-        </Notice>
-      </Panel>
+      <>
+        <Panel
+          title="Base de conhecimento"
+          icon={<BookOpen size={16} />}
+          description="Documentos que o agente consulta e mídias que ele pode enviar na conversa."
+        >
+          <Notice tone="amber">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>Salve o agente antes de enviar documentos e mídias. Depois de salvar, você continua aqui no editor.</span>
+              <button type="button" className={BTN_PRIMARY} onClick={onRequestSave} disabled={saving}>
+                {saving ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
+                Salvar agora
+              </button>
+            </div>
+          </Notice>
+        </Panel>
+        {children}
+      </>
     );
   }
 
@@ -750,7 +754,7 @@ export const KnowledgePanel: React.FC<{
           <Notice tone="red">{errorMessage(docsQ.error, 'Falha ao carregar os documentos')}</Notice>
         ) : docs.length === 0 ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Nenhum documento. Sem base de conhecimento, o agente responde só com o roteiro.
+            Nenhum documento adicionado.
           </p>
         ) : (
           <ul className="space-y-2" aria-label="Documentos">
@@ -803,6 +807,8 @@ export const KnowledgePanel: React.FC<{
           </p>
         ) : null}
       </Panel>
+
+      {children}
 
       <Panel
         title="Mídias"

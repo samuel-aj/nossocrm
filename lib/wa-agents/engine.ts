@@ -50,7 +50,8 @@ import { segmentText } from './replyOutput';
 import { checkGeneratedOab, oabQuestionContext, oabSystemContext } from './oabDelivery';
 import { loadAgentResources } from './resources';
 import { logRun } from './runs';
-import { mergeSavedDataInto, NO_REPLY_TOKEN, sanitizeSavedData } from './savedData';
+import { mergeSavedData, mergeSavedDataInto, NO_REPLY_TOKEN } from './savedData';
+import { findOutcome, guardOutcomeData, INCOMPLETE_OUTCOME, outcomeDataExtractor } from './outcomeData';
 import { splitLines } from './split';
 import { normalizeKeyword } from './text';
 import { MEDIA_MESSAGE_COLUMNS, understandMedia, type MediaMessageRow } from './mediaIn';
@@ -68,7 +69,6 @@ import type {
   ConversationApproval,
   CustomAction,
   KnowledgeHit,
-  Outcome,
   RunStatus,
   RunTrigger,
 } from './types';
@@ -223,30 +223,7 @@ export function findCustomAction(actions: CustomAction[], key: string): CustomAc
   );
 }
 
-/** Dados salvos via salvar_dados (mesclados na ordem das chamadas e saneados: chaves curtas, valores primitivos). */
-export function mergeSavedData(toolCalls: CollectedToolCall[]): Record<string, unknown> | null {
-  let merged: Record<string, unknown> | null = null;
-  for (const tc of toolCalls) {
-    if (tc.tool !== 'salvar_dados') continue;
-    const dados = (tc.input as { dados?: unknown } | null)?.dados;
-    if (dados && typeof dados === 'object' && !Array.isArray(dados)) {
-      merged = { ...(merged ?? {}), ...(dados as Record<string, unknown>) };
-    }
-  }
-  return merged ? sanitizeSavedData(merged) : null;
-}
-
-/** Acha o resultado pela chave (fallback: igual ignorando caixa/espaços). */
-export function findOutcome(outcomes: Outcome[], key: string): Outcome | null {
-  const k = (key || '').trim();
-  if (!k) return null;
-  return (
-    outcomes.find(o => o.key === k) ??
-    outcomes.find(o => o.key.toLowerCase() === k.toLowerCase()) ??
-    outcomes.find(o => o.label.trim().toLowerCase() === k.toLowerCase()) ??
-    null
-  );
-}
+export { mergeSavedData, findOutcome };
 
 // ---------------------------------------------------------------------------
 // Consultas auxiliares
@@ -1004,6 +981,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       gen = { text: recoveredLines.join('\n'), segments: recoveredLines.map(text => ({ kind: 'text', text })),
         toolCalls: input.recoveryAfterSend?.toolCalls ?? [], usage: null, finishReason: 'recovered',
         outputSafety: { status: 'passed', issues: [], duplicatesRemoved: 0, recoveryAttempted: false, steps: [] } };
+      gen = await guardOutcomeData(gen, agent.outcomes, priorState.dados, messages);
     } else {
       const resolved = await resolveAgentModel(admin, organizationId, agent);
       modelId = resolved.modelId;
@@ -1012,6 +990,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       await beginDispatch();
       gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction,
         inboundReturn: !input.forceReply && !input.proactive && pending.length > 0 });
+      gen = await guardOutcomeData(gen, agent.outcomes, priorState.dados, messages, outcomeDataExtractor(resolved.model));
     }
     assertUsageHealthy();
     if (gen.contractWait || !gen.segments.length) await checkInbound();
@@ -1239,7 +1218,9 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       state.midias_enviadas = Array.from(new Set([...(state.midias_enviadas ?? []), ...mediaSent]));
     }
     // Respostas enviadas neste atendimento (teto max_replies): só conta quando algo saiu
-    if (lines.length > 0 || mediaSent.length > 0) state.respostas = repliesSoFar + 1;
+    if ((lines.length > 0 || mediaSent.length > 0) && !(mustClose && gen.finishReason === INCOMPLETE_OUTCOME)) {
+      state.respostas = repliesSoFar + 1;
+    }
     await updateConversation(admin, ctx, {
       ...(lastIn ? { ai_last_processed_at: lastIn.created_at } : {}),
       ai_state: state,
@@ -1324,11 +1305,12 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
           runEvents: events,
           renewLock: renew,
         });
-        await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo });
-        humanReview = [outcome.key, outcome.label].some(value =>
+        const finalSummary = acts.manualReviewReason || resumo;
+        await emit('finished', { resultado: outcome.key, resultado_label: outcome.label, resumo: finalSummary });
+        humanReview = !!acts.manualReviewReason || [outcome.key, outcome.label].some(value =>
           value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase().replace(/[\s_-]+/g, '-') === 'analise-humana');
         if (requestsTransition(acts)) {
-          transition = { acts, summary: resumo, reason: 'resultado com parada', extra: { resultado: outcome.key, resumo } };
+          transition = { acts, summary: finalSummary, reason: acts.manualReviewReason || 'resultado com parada', extra: { resultado: outcome.key, resumo: finalSummary } };
         } else {
           // Atendimento encerrado = agente para nesta conversa (o chat mostra que ele não está mais
           // ativo). Parada pelo próprio agente: palavra-chave ou pipeline podem abrir um atendimento novo.
@@ -1409,7 +1391,7 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
     // 9d. Teto de respostas: esta era a última resposta permitida e a conversa continua ativa
     // com este agente (o modelo não encerrou, encerrou com resultado inválido ou o resultado
     // não parou a conversa; sem passagem nem aprovação): para aqui
-    if (mustClose && ctx.conversation.ai_status === 'active' && !pendingHandoffAgentId) {
+    if (mustClose && gen.finishReason !== INCOMPLETE_OUTCOME && ctx.conversation.ai_status === 'active' && !pendingHandoffAgentId) {
       const extra = { max_replies: agent.max_replies, respostas: state.respostas ?? repliesSoFar };
       pushEvent('max_replies_reached', extra);
       await stopConversation('limite de respostas atingido', extra);
