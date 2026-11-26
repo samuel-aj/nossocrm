@@ -20,6 +20,7 @@
 - Other sessions publish to `main` in parallel: always `git fetch` and merge `origin/main` before pushing.
 - Before every push to `main`, bookmark what is live: `npm run checkpoint -- <short-name>` (creates and pushes the tag `prod-pre-<short-name>` at the current production commit).
 - A release that needs SQL ships with an undo file `docs/<name>-rollback.sql` whose header says when to use it and whether it runs before or after rolling the code back. Add the pair to the table in `docs/restauracao.md`.
+- Every release that changes what runs in production adds its entry to `CHANGELOG.md` in the same merge (template at the top of the file; plain pt-BR, written for a non-developer; newest entry right below the marker line). Check with `npm run changelog:check`. GitHub runs the same check on every PR and push to `main`; docs-only and test-only changes are exempt.
 - Never force-push or delete `main`, and never delete `prod-pre-*` tags.
 - Never run destructive SQL or delete Storage files in production without a restore path (Storage objects are NOT covered by database backups).
 - How to roll back code, schema and data: `docs/restauracao.md`.

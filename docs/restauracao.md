@@ -21,6 +21,8 @@ npm run checkpoint -- --list          # lista os pontos existentes
 
 A etiqueta aponta para o commit que está em produção naquele momento. Se a publicação nova der problema, é para ela que se volta.
 
+Toda publicação também ganha a sua entrada no [CHANGELOG.md](../CHANGELOG.md), com o nome da etiqueta criada aqui.
+
 Se a publicação inclui SQL, ela vai acompanhada de um arquivo `docs/<assunto>-rollback.sql`. O cabeçalho do arquivo diz quando usar e se o SQL roda antes ou depois de voltar o código. Acrescente a linha na tabela da seção 4.
 
 ## 2. Voltar o código
@@ -81,6 +83,7 @@ A restauração não traz de volta arquivos apagados do Storage (seção 5).
 | `prod-pre-api-limites` | Limite de requisições nas APIs | Não tem SQL |
 | `prod-pre-senha-forte` | Regra de senha forte | Não tem SQL (a regra do painel do Supabase se desliga em Authentication > Sign In / Providers > Email) |
 | `prod-pre-restauracao` | Este guia e o comando `npm run checkpoint` | Não tem SQL |
+| `prod-pre-changelog` | Registro de alterações (`CHANGELOG.md`) e a conferência automática | Não tem SQL |
 
 ## 5. O que não tem ponto de restauração
 

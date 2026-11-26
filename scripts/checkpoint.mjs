@@ -22,7 +22,8 @@ if (args.includes('--list')) {
   const lines = git(
     'for-each-ref',
     '--sort=-creatordate',
-    '--format=%(creatordate:short)  %(objectname:short)  %(refname:short)',
+    // etiqueta anotada: mostra o commit para onde ela aponta, não o id da própria etiqueta
+    '--format=%(creatordate:short)  %(if)%(*objectname)%(then)%(*objectname:short)%(else)%(objectname:short)%(end)  %(refname:short)',
     'refs/tags/prod-pre-*',
   );
   console.log(lines || 'Nenhum ponto de restauração ainda.');
@@ -57,3 +58,13 @@ git('tag', '-a', tag, sha, '-m', `Produção antes de: ${name}`);
 git('push', 'origin', tag);
 
 console.log(`Enviado ao GitHub. Para voltar a esta versão, siga docs/restauracao.md.`);
+
+// Lembrete do registro de alterações: a branch que vai ser publicada já traz a entrada?
+try {
+  const changed = git('diff', '--name-only', 'origin/main...HEAD').split(/\r?\n/);
+  if (changed.filter(Boolean).length && !changed.includes('CHANGELOG.md')) {
+    console.log('Atenção: esta branch ainda não tem entrada no CHANGELOG.md. Confira com: npm run changelog:check');
+  }
+} catch {
+  // sem branch local para comparar: segue sem o lembrete
+}
