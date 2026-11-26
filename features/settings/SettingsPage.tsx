@@ -69,7 +69,11 @@ const GeneralSettings: React.FC = () => {
           }
         />
         {profile?.organization_id && (profile.role === UserRole.ADMIN || profile.role === UserRole.SUPER_ADMIN) && (
-          <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} />
+          <section className="border-t border-slate-100 dark:border-white/10 pt-4">
+            <h3 className="text-sm font-semibold">Inscrições da OAB</h3>
+            <p className="mt-1 text-xs text-slate-500">Confirme as inscrições que os agentes de IA podem informar aos clientes.</p>
+            <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} />
+          </section>
         )}
       </SettingsCard>
       <SettingsCard title="Navegação" icon={Compass}>

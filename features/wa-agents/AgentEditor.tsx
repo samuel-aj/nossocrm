@@ -34,6 +34,7 @@ import {
   ListChecks,
   X,
   BookOpen,
+  Scale,
   Calculator,
   AlarmClock,
   KanbanSquare,
@@ -44,7 +45,10 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { OabRegistrationSettings } from '@/features/settings/components/OabRegistrationSettings';
+import { UserRole } from '@/types/constants';
 import {
   AI_PROVIDERS,
   AGENT_VOICES,
@@ -910,6 +914,7 @@ export const AgentEditor: React.FC<{
   onClose: () => void;
 }> = ({ agent, initial, onClose }) => {
   const { showToast } = useToast();
+  const { profile } = useAuth();
   const optionsQ = useWaAgentOptions();
   const agentsQ = useWaAgentsList();
   const botsQ = useWaBotsList();
@@ -1277,7 +1282,18 @@ export const AgentEditor: React.FC<{
           onRenameMedia={renameMediaTokens}
           onRequestSave={() => void handleSave()}
           saving={save.isPending}
-        />
+        >
+          {profile?.organization_id && (!agent || agent.organization_id === profile.organization_id) &&
+            (profile.role === UserRole.ADMIN || profile.role === UserRole.SUPER_ADMIN) && (
+              <Panel
+                title="Inscrições da OAB"
+                icon={<Scale size={16} />}
+                description="Ao confirmar uma inscrição, você autoriza todos os agentes deste escritório a informar esse número aos clientes."
+              >
+                <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} active={tab === 'conhecimento'} />
+              </Panel>
+            )}
+        </KnowledgePanel>
       </TabPanel>
 
       {/* 3. Ações e recursos */}
