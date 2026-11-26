@@ -84,6 +84,7 @@ A restauração não traz de volta arquivos apagados do Storage (seção 5).
 | `prod-pre-senha-forte` | Regra de senha forte | Não tem SQL (a regra do painel do Supabase se desliga em Authentication > Sign In / Providers > Email) |
 | `prod-pre-restauracao` | Este guia e o comando `npm run checkpoint` | Não tem SQL |
 | `prod-pre-changelog` | Registro de alterações (`CHANGELOG.md`) e a conferência automática | Não tem SQL |
+| `prod-pre-decisoes-seg` | Registro das decisões de segurança (`docs/decisoes-seguranca.md`) | Não tem SQL |
 
 ## 5. O que não tem ponto de restauração
 
