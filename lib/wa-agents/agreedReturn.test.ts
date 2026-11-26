@@ -84,6 +84,7 @@ describe('retorno combinado com o cliente', () => {
     ['2026-11-24T20:00:00Z', '2026-11-25T12:30:00Z', 'America/Sao_Paulo', 'Combinado! Te chamo amanhã (25/11) às 9h30.'],
     ['2026-11-24T20:00:00Z', '2026-11-27T17:05:59Z', 'America/Sao_Paulo', 'Combinado! Te chamo dia 27/11 às 14h05.'],
     ['2026-11-25T12:00:00Z', '2026-11-26T03:00:00Z', 'America/Sao_Paulo', 'Combinado! Te chamo amanhã (26/11) à 0h.'],
+    ['2026-11-25T12:00:00Z', '2026-11-26T04:00:00Z', 'America/Sao_Paulo', 'Combinado! Te chamo amanhã (26/11) à 1h.'],
     ['2026-11-25T12:00:00Z', '2026-11-26T05:00:00Z', 'America/Sao_Paulo', 'Combinado! Te chamo amanhã (26/11) às 2h.'],
     // The year appears only when it differs. In São Paulo, 2027-01-01T01:00Z is still 31/12/2026.
     ['2026-12-28T15:00:00Z', '2027-01-05T12:00:00Z', 'America/Sao_Paulo', 'Combinado! Te chamo dia 05/01/2027 às 9h.'],
@@ -118,7 +119,8 @@ describe('retorno combinado com o cliente', () => {
     expect(guardBooked([{ kind: 'text', text: 'Combinado, Fulano!' }, { kind: 'text', text: 'Vou te chamar amanhã às 9h.' }])).toEqual([kept, said]);
     expect(guardBooked([{ kind: 'media', name: 'Guia', caption: reply }])).toEqual([{ kind: 'media', name: 'Guia', caption: 'Combinado, Fulano!' }, said]);
   });
-  it.each(['Tá combinado, Fulano!', 'Perfeito, Fulano, combinado!', 'Combinadíssimo, Fulano!', '*Combinado*, Fulano!', '👍 Combinado!'])('não repete o combinado que não abre a frase do modelo (%s)', opening => {
+  // The last one is not a confirmation, yet any kept "combinado" drops the opening: the day and the hour are still said.
+  it.each(['Tá combinado, Fulano!', 'Perfeito, Fulano, combinado!', 'Combinadíssimo, Fulano!', '*Combinado*, Fulano!', '👍 Combinado!', 'Conforme combinado, segue o guia.'])('não repete o combinado dito de outras formas (%s)', opening => {
     const reply = opening + ' Te chamo amanhã às 9h.';
     const said = { kind: 'text', text: 'Te chamo amanhã (25/11) às 9h.' };
     expect(guardBooked([{ kind: 'text', text: reply }])).toEqual([{ kind: 'text', text: opening }, said]);
@@ -128,6 +130,21 @@ describe('retorno combinado com o cliente', () => {
     const said = { kind: 'text', text: 'Combinado! Te chamo amanhã (25/11) às 9h.' };
     expect(guardBooked([{ kind: 'text', text: 'Perfeito, Fulano! Te chamo amanhã às 9h.' }])).toEqual([{ kind: 'text', text: 'Perfeito, Fulano!' }, said]);
     expect(guardBooked([{ kind: 'text', text: 'Combinado! Te chamo amanhã às 9h.' }], [user('Me chama amanhã de manhã')])).toEqual([said]);
+  });
+  it('não confirma quando a reserva pela ferramenta falhou', () => {
+    // Even if a failed call carried an id and a time, only ok=true counts as a reservation.
+    const failed = [{ tool: 'agendar_retorno', input: {}, output: { ok: false, error: 'Conversa mudou', id: 'r', scheduledAt: '2026-11-25T12:00:00Z', timezone: 'America/Sao_Paulo' } }];
+    expect(guardReturnPromises([{ kind: 'text', text: 'Te chamo amanhã às 9h.' }], failed, true, [], '2026-11-24T20:00:00Z'))
+      .toEqual([{ kind: 'text', text: RETURN_UNCONFIRMED }]);
+  });
+  // The system's own sentence, repeated by the model in a later turn without a reservation, is still a promise to check.
+  it.each([
+    'Combinado! Te chamo amanhã (25/11) às 9h.',
+    'Te chamo hoje (25/11) às 15h.',
+    'Combinado! Te chamo dia 27/11 às 9h30.',
+    'Te chamo dia 05/01/2027 às 9h.',
+  ])('trata como promessa a frase do sistema repetida pelo modelo sem reserva (%s)', text => {
+    expect(guardReturnPromises([{ kind: 'text', text }], [], true)?.at(-1)).toMatchObject({ text: expect.stringContaining('Qual dia') });
   });
   it('não aceita um pedido de retorno com um simples combinado quando o robô está desligado', () => {
     const ack = [{ kind: 'text' as const, text: 'Combinado!' }];
