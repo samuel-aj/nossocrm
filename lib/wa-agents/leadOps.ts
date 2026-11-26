@@ -77,7 +77,7 @@ export type LeadChangeOutcome = { changed: string[]; problems: string[] };
  */
 export async function applyLeadChanges(
   admin: SupabaseClient,
-  input: { organizationId: string; dealId: string; changes: LeadChange[]; render: (text: string) => string; recoverValue?: (variable: string) => string | undefined },
+  input: { organizationId: string; dealId: string; changes: LeadChange[]; render: (text: string) => string; recoverValue?: (variable: string) => string | undefined; verifyPersisted?: boolean },
   retryOnConflict = true
 ): Promise<LeadChangeOutcome> {
   const { organizationId, dealId } = input;
@@ -116,7 +116,7 @@ export async function applyLeadChanges(
       .update({ ...updates, updated_at: nowIso() })
       .eq('organization_id', organizationId)
       .eq('id', dealId);
-    if (input.recoverValue && updates.custom_fields) {
+    if ((input.recoverValue || input.verifyPersisted) && updates.custom_fields) {
       // Someone can finish the same ficha while the agent is reading it. Never
       // replace the current JSON with the one read before their edit.
       const guarded = current.updated_at ? query.eq('updated_at', current.updated_at) : query.is('updated_at', null);

@@ -18,6 +18,19 @@ export const SAVED_DATA_MAX_CHARS = 2048;
 
 export type SavedValue = string | number | boolean | null;
 
+/** Values proposed in a single turn, in the same order as the tool calls. */
+export function mergeSavedData(toolCalls: ReadonlyArray<{ tool: string; input: unknown }>): Record<string, SavedValue> | null {
+  let merged: Record<string, unknown> | null = null;
+  for (const call of toolCalls) {
+    if (call.tool !== 'salvar_dados') continue;
+    const dados = (call.input as { dados?: unknown } | null)?.dados;
+    if (dados && typeof dados === 'object' && !Array.isArray(dados)) {
+      merged = { ...(merged ?? {}), ...(dados as Record<string, unknown>) };
+    }
+  }
+  return merged ? sanitizeSavedData(merged) : null;
+}
+
 /** Caracteres de controle (inclui quebras de linha e tabulação). */
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]/g;
 
