@@ -17,7 +17,6 @@ import { McpSection } from './components/McpSection';
 import { ZapSignSection } from './components/ZapSignSection';
 import { Api4comPersonalCard, Api4comSection } from './components/Api4comSection';
 import { DataStorageSettings } from './components/DataStorageSettings';
-import { OabRegistrationSettings } from './components/OabRegistrationSettings';
 import AppearanceSettings from './components/AppearanceSettings';
 import { ProductsCatalogManager } from './components/ProductsCatalogManager';
 import { UserRole } from '@/types/constants';
@@ -68,13 +67,6 @@ const GeneralSettings: React.FC = () => {
             </span>
           }
         />
-        {profile?.organization_id && (profile.role === UserRole.ADMIN || profile.role === UserRole.SUPER_ADMIN) && (
-          <section className="border-t border-slate-100 dark:border-white/10 pt-4">
-            <h3 className="text-sm font-semibold">Inscrições da OAB</h3>
-            <p className="mt-1 text-xs text-slate-500">Confirme as inscrições que os agentes de IA podem informar aos clientes.</p>
-            <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} />
-          </section>
-        )}
       </SettingsCard>
       <SettingsCard title="Navegação" icon={Compass}>
         <SettingsRow

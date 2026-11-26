@@ -28,6 +28,15 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Cadastro da OAB somente em Conhecimento
+
+- **Tipo:** Melhoria
+- **O que mudou:** O administrador agora encontra o cadastro das inscrições da OAB exclusivamente na aba Conhecimento do editor de agentes. As inscrições já confirmadas continuam disponíveis para os agentes do escritório.
+- **Por quê:** Concentrar o cadastro no local em que o escritório configura as informações que a IA pode usar.
+- **Quem:** Samuel pediu, Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-oab-somente-conhecimento-20261126`.
+
 ### 26/11/2026 · Inscrições da OAB na aba Conhecimento dos agentes
 
 - **Tipo:** Melhoria
