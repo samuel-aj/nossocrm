@@ -28,6 +28,15 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Inscrições da OAB na aba Conhecimento dos agentes
+
+- **Tipo:** Melhoria
+- **O que mudou:** Ao editar um agente, o administrador encontra as inscrições da OAB entre a base de conhecimento e as mídias. É o mesmo cadastro do escritório disponível em Configurações → Geral.
+- **Por quê:** Permitir que o escritório confira quais números da OAB seus agentes podem informar enquanto configura o atendimento.
+- **Quem:** Samuel pediu, Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-oab-conhecimento-20261126`.
+
 ### 26/11/2026 · Registro das decisões de segurança
 - **Tipo:** Infraestrutura
 - **O que mudou:** novo documento [docs/decisoes-seguranca.md](docs/decisoes-seguranca.md) com 33 decisões: o que cada regra faz, por quê, quem aprovou, quando entrou, onde fica e o que acontece se for removida. Regra no `AGENTS.md` para manter o documento em dia.
