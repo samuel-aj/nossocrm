@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Confirmação do retorno combinado em linguagem natural
+- **Tipo:** Melhoria
+- **O que mudou:** quando o lead combina um horário de retorno, a confirmação no WhatsApp sai como "Combinado! Te chamo amanhã (26/11) às 9h.", sem ano e sem fuso. A frase diz "hoje", "amanhã" ou "dia 27/11", e os minutos só aparecem quando não são zero. Se a IA já tinha escrito "Combinado", a palavra não se repete.
+- **Por quê:** a frase antiga ("Combinado! Vou te chamar em 25/11/2026, 09:00 GMT-3.") soava robótica, e um escritório pediu um formato mais natural.
+- **Quem:** pedido de um escritório cliente, Claude Code fez (PR #89).
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-frase-retorno`.
+
 ### 26/11/2026 · Registro das decisões de segurança
 - **Tipo:** Infraestrutura
 - **O que mudou:** novo documento [docs/decisoes-seguranca.md](docs/decisoes-seguranca.md) com 33 decisões: o que cada regra faz, por quê, quem aprovou, quando entrou, onde fica e o que acontece se for removida. Regra no `AGENTS.md` para manter o documento em dia.
