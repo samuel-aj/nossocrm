@@ -81,6 +81,9 @@ vi.mock("@/context/CRMContext", () => ({
         options: ["A"],
       },
       { id: "field-5", key: "active", label: "Ativo", type: "text" },
+      ...(mocks.org === "0d1c32d7-1e99-40fd-8813-8fa6b4b5785d" ? [
+        { id: "pdf", key: "telexfree_contrato_pdf", label: "Link do contrato (PDF)", type: "text" },
+      ] : []),
     ],
   }),
 }));
@@ -188,6 +191,35 @@ beforeEach(() => {
 });
 
 describe("LeadPropertiesPanel", () => {
+  const hwOrg = "0d1c32d7-1e99-40fd-8813-8fa6b4b5785d";
+  const telexfreeBoard = "862f6070-6a0b-4cc8-a9d3-1d036467a5f3";
+  const pdf = "https://drive.google.com/file/d/test-contract_01/view";
+
+  it("opens a generated Telexfree PDF directly even with read-only access and collapsed fields", () => {
+    mocks.edit = false;
+    mocks.org = hwOrg;
+    setup({ ...deal, boardId: telexfreeBoard, customFields: { telexfree_contrato_pdf: pdf } });
+    expect(screen.getByRole("button", { name: /Campos personalizados/ })).toHaveAttribute("aria-expanded", "false");
+    const link = screen.getByRole("link", { name: "Abrir contrato em PDF" });
+    expect(link).toHaveAttribute("href", pdf);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(mocks.updateDeal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [hwOrg, telexfreeBoard, ""],
+    [hwOrg, telexfreeBoard, "https://drive.google.com.example.org/file/d/test/view"],
+    [hwOrg, telexfreeBoard, "https://drive.google.com/drive/folders/test"],
+    [hwOrg, telexfreeBoard, "javascript:alert(1)"],
+    [hwOrg, "other-board", pdf],
+    ["other-org", telexfreeBoard, pdf],
+  ])("omits the contract shortcut outside the authorized field and file path (%s, %s, %s)", (org, boardId, url) => {
+    mocks.org = org;
+    setup({ ...deal, boardId, customFields: { telexfree_contrato_pdf: url } });
+    expect(screen.queryByRole("link", { name: "Abrir contrato em PDF" })).not.toBeInTheDocument();
+  });
+
   it('edits native source and explicitly clears legacy source without rewriting custom fields or UTMs', async () => {
     const current = { ...deal, customFields: { origem: 'Evento antigo', utm_source: 'google', utm_campaign: 'Campanha original' } };
     setup(current);

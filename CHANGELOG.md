@@ -28,6 +28,15 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Acesso ao PDF do contrato no card da Telexfree
+
+- **Tipo:** Melhoria
+- **O que mudou:** Quando o contrato está disponível, a equipe da HW Rocha pode escolher “Abrir contrato em PDF” no card da Telexfree. O arquivo abre em outra aba.
+- **Por quê:** Facilitar a conferência do contrato e o encaminhamento para assinatura pelo GOV.BR.
+- **Quem:** Samuel pediu, Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-telexfree-pdf-card-20261126`.
+
 ### 26/11/2026 · Cadastro da OAB somente em Conhecimento
 
 - **Tipo:** Melhoria

@@ -70,6 +70,10 @@ const INITIAL_OPEN: Record<Section, boolean> = {
   utms: false,
   details: false,
 };
+const HW_ROCHA_ORG_ID = "0d1c32d7-1e99-40fd-8813-8fa6b4b5785d";
+const TELEXFREE_BOARD_ID = "862f6070-6a0b-4cc8-a9d3-1d036467a5f3";
+const CONTRACT_PDF_FIELD = "telexfree_contrato_pdf";
+const DRIVE_FILE_VIEW = /^https:\/\/drive\.google\.com\/file\/d\/[A-Za-z0-9_-]+\/view\/?(?:[?#][^\s]*)?$/;
 const money = (value: number) =>
   Number(value || 0).toLocaleString("pt-BR", {
     style: "currency",
@@ -240,6 +244,10 @@ export function LeadPropertiesPanel({
       !hiddenGroups.has((f.groupName ?? "").trim()),
   );
   const fieldDefinitions = visibleDefinitions.filter(f => !f.key.startsWith("utm_") && f.key !== 'origem');
+  const contractPdf = deal.customFields?.[CONTRACT_PDF_FIELD];
+  const showContractLink = organizationId === HW_ROCHA_ORG_ID && deal.boardId === TELEXFREE_BOARD_ID
+    && typeof contractPdf === "string" && DRIVE_FILE_VIEW.test(contractPdf)
+    && fieldDefinitions.some(field => field.key === CONTRACT_PDF_FIELD);
   const utmDefinitions = visibleDefinitions.filter(f => f.key.startsWith("utm_"));
   const groups = new Map<string, CustomFieldDefinition[]>();
   for (const field of fieldDefinitions) {
@@ -917,6 +925,16 @@ export function LeadPropertiesPanel({
               </button>
             )}
           </div>
+        )}
+        {showContractLink && (
+          <a
+            href={contractPdf}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-primary-600 hover:underline focus-visible:outline-2 focus-visible:outline-primary-500 dark:text-primary-400"
+          >
+            <ExternalLink size={16} aria-hidden="true" /> Abrir contrato em PDF
+          </a>
         )}
         <SectionCard
           title="Negócio"
