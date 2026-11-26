@@ -35,6 +35,7 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 - **Quem:** pedido de um escritório cliente, Claude Code fez (PR #89).
 - **Banco:** sem SQL.
 - **Para voltar:** `prod-pre-frase-retorno`.
+
 ### 26/11/2026 · Conferência dos dados antes de preparar um contrato
 - **Tipo:** Correção
 - **O que mudou:** Em resultados configurados para exigir dados, o agente guarda o que o cliente já informou e pergunta apenas o que falta. A equipe recebe uma tarefa de revisão se houver falha ao atualizar o negócio ou preparar o documento.
