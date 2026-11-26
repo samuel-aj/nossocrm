@@ -135,6 +135,7 @@ type AgentFormState = {
   name: string;
   persona_name: string;
   enabled: boolean;
+  squad_monitoring: boolean;
   connection_ids: string[];
   provider: AiProvider;
   model: string;
@@ -229,6 +230,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   name: 'roteiro',
   persona_name: 'roteiro',
   enabled: 'roteiro',
+  squad_monitoring: 'roteiro',
   system_prompt: 'roteiro',
   stop_rules: 'roteiro',
   connection_ids: 'gatilhos',
@@ -284,6 +286,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     name: src.name ?? '',
     persona_name: src.persona_name ?? '',
     enabled: src.enabled ?? true,
+    squad_monitoring: agent?.squad_monitoring ?? false,
     connection_ids: src.connection_ids ?? [],
     provider,
     model: src.model ?? firstModel(provider),
@@ -320,6 +323,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     name: form.name.trim(),
     persona_name: form.persona_name.trim() || null,
     enabled: form.enabled,
+    squad_monitoring: form.squad_monitoring,
     connection_ids: form.connection_ids,
     provider: form.provider,
     model: form.model.trim(),
@@ -371,6 +375,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
 
 const FIELD_NAMES: Record<string, string> = {
   name: 'Nome',
+  squad_monitoring: 'Monitorar com o squad',
   persona_name: 'Nome da persona',
   connection_ids: 'Números',
   provider: 'Provedor',
@@ -1232,6 +1237,15 @@ export const AgentEditor: React.FC<{
                 placeholder="Ex.: Ana"
               />
             </Field>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Monitorar com o squad</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Permite ao AgentMaker consultar as conversas deste agente. Uma chave com permissão de edição também pode atualizar o roteiro e as regras de encerramento.
+              </p>
+            </div>
+            <Toggle checked={form.squad_monitoring} onChange={squad_monitoring => patch({ squad_monitoring })} label="Monitorar com o squad" />
           </div>
           {!form.enabled ? <Notice tone="amber">Desligado, o agente não responde e não pode ser iniciado.</Notice> : null}
         </Panel>

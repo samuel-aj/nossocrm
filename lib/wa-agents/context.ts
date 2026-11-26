@@ -251,6 +251,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     name: String(raw.name ?? ''),
     persona_name: (raw.persona_name as string | null) ?? null,
     enabled: raw.enabled !== false,
+    squad_monitoring: raw.squad_monitoring === true,
     connection_ids: Array.isArray(raw.connection_ids) ? (raw.connection_ids as string[]).map(String) : [],
     provider,
     model: String(raw.model ?? ''),

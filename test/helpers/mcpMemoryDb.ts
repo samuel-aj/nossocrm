@@ -18,9 +18,13 @@ export function memoryDb(tables: Record<string, Record<string, any>[]>) {
     const q = {
       select: (projection='*') => { call.projection = projection; return q; },
       eq: (key: string, value: unknown) => { call.filters.push([key,value]); predicates.push(r => r[key] === value); return q; },
+      neq: (key: string, value: unknown) => { predicates.push(r => r[key] !== value); return q; },
+      is: (key: string, value: null | boolean) => { predicates.push(r => (r[key] ?? null) === value); return q; },
       match: (values: Record<string,unknown>) => { Object.entries(values).forEach(([key,value]) => q.eq(key,value)); return q; },
       in: (key: string, values: unknown[]) => { predicates.push(r => values.includes(r[key])); return q; },
       gt: (key: string,value: string) => { predicates.push(r => r[key] > value); return q; },
+      lt: (key: string, value: number) => { predicates.push(r => r[key] < value); return q; },
+      lte: (key: string, value: number) => { predicates.push(r => r[key] <= value); return q; },
       ilike: (key: string,value: string) => { predicates.push(r => String(r[key] ?? '').toLowerCase().includes(value.slice(1,-1).toLowerCase())); return q; },
       order: (key: string, options?: { ascending: boolean }) => { ordering.push({key,ascending:options?.ascending ?? true}); return q; },
       limit: (n: number) => { limit=n; return q; },

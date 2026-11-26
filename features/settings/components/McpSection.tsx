@@ -1,7 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { ServerCog, Copy, CheckCircle2, Play, AlertTriangle, RefreshCw, ChevronDown } from 'lucide-react';
 import { useOptionalToast } from '@/context/ToastContext';
-import { supabase } from '@/lib/supabase/client';
+import { createOrganizationApiKey } from '@/lib/apiKeys/client';
+import type { ApiKeyAccessMode } from '@/lib/apiKeys/accessModes';
+import { ApiKeyAccessField } from './ApiKeyAccessField';
 import { SettingsSection } from './SettingsSection';
 
 /**
@@ -15,6 +17,7 @@ export const McpSection: React.FC = () => {
   const protocolVersion = '2025-11-25';
 
   const [apiKey, setApiKey] = useState('');
+  const [accessMode, setAccessMode] = useState<ApiKeyAccessMode>('full');
   const [creatingKey, setCreatingKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -50,19 +53,10 @@ export const McpSection: React.FC = () => {
   };
 
   const createApiKeyInline = async (): Promise<string | null> => {
-    if (!supabase) {
-      addToast('Supabase não configurado neste ambiente.', 'error');
-      return null;
-    }
-
     setCreatingKey(true);
     try {
       const name = `MCP ${new Date().toLocaleDateString('pt-BR')}`;
-      const { data, error } = await supabase.rpc('create_api_key', { p_name: name });
-      if (error) throw error;
-      const row = Array.isArray(data) ? data[0] : data;
-      const token = row?.token as string | undefined;
-      if (!token) throw new Error('Resposta inválida ao criar chave');
+      const { token } = await createOrganizationApiKey(name, accessMode);
 
       setApiKey(token);
       setTestResult(null);
@@ -102,8 +96,7 @@ export const McpSection: React.FC = () => {
     }
   };
 
-  const testConnection = async () => {
-    const token = apiKey.trim();
+  const testConnection = async (token = apiKey.trim()) => {
     if (!token) {
       addToast('Cole uma API key para testar.', 'warning');
       return;
@@ -132,7 +125,7 @@ export const McpSection: React.FC = () => {
         }),
       });
       const initParsed = await parseJsonSafe(initRes);
-      if (!initRes.ok) {
+      if (!initRes.ok || !initParsed.json?.result) {
         const msg =
           initParsed?.json?.error?.message ||
           initParsed?.json?.error ||
@@ -152,7 +145,7 @@ export const McpSection: React.FC = () => {
         body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
       });
       const listParsed = await parseJsonSafe(listRes);
-      if (!listRes.ok) {
+      if (!listRes.ok || !Array.isArray(listParsed.json?.result?.tools)) {
         const msg =
           listParsed?.json?.error?.message ||
           listParsed?.json?.error ||
@@ -165,6 +158,14 @@ export const McpSection: React.FC = () => {
       }
 
       const tools = (listParsed?.json?.result?.tools as any[]) || [];
+      if (!tools.length) {
+        setTestResult({
+          ok: false, toolsCount: 0,
+          message: 'O CRM reconheceu a chave. Confira o acesso dela e as permissões de quem a criou neste escritório. Para o AgentMaker, confira também a liberação do módulo de agentes de IA.',
+          testedAtIso: new Date().toISOString(),
+        });
+        return;
+      }
       const toolsPreview = tools
         .map((t) => t?.name)
         .filter((v) => typeof v === 'string')
@@ -201,7 +202,7 @@ export const McpSection: React.FC = () => {
       setShowHaveKey(true);
       setTimeout(() => apiKeyInputRef.current?.focus(), 0);
 
-      await testConnection();
+      await testConnection(token);
     } finally {
       setConnecting(false);
     }
@@ -212,6 +213,7 @@ export const McpSection: React.FC = () => {
       <div className="mt-4">
         {/* Jobs-mode hero */}
         <div className="mt-4 rounded-2xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 p-5">
+          {!apiKey.trim() && <ApiKeyAccessField value={accessMode} onChange={setAccessMode} disabled={connecting || creatingKey} />}
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               <div className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -305,7 +307,7 @@ export const McpSection: React.FC = () => {
             <div className="mt-4 rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 p-4">
               <div className="text-sm font-semibold text-rose-800 dark:text-rose-200 inline-flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
-                Não foi possível conectar
+                {testResult.toolsCount === 0 ? 'Nenhuma ferramenta disponível para esta chave' : 'Não foi possível conectar'}
               </div>
               <div className="mt-1 text-xs text-rose-800/80 dark:text-rose-200/80">{testResult.message}</div>
             </div>
@@ -337,7 +339,7 @@ export const McpSection: React.FC = () => {
                 />
                 <button
                   type="button"
-                  onClick={testConnection}
+                  onClick={() => testConnection()}
                   disabled={testing}
                   className="px-3 py-2.5 rounded-lg bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white text-sm font-semibold inline-flex items-center gap-2"
                 >

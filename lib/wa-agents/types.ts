@@ -314,6 +314,7 @@ export const AgentInputSchema = z.object({
   name: z.string().min(1).max(120),
   persona_name: z.string().max(80).nullable().optional(),
   enabled: z.boolean().default(true),
+  squad_monitoring: z.boolean().default(false),
   connection_ids: z.array(z.string().uuid()).default([]),
   provider: z.enum(AI_PROVIDERS),
   model: z.string().min(1).max(120),

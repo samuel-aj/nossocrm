@@ -6,30 +6,12 @@ import ConfirmModal from '@/components/ConfirmModal';
 import { useOptionalToast } from '@/context/ToastContext';
 import { useBoards } from '@/context/boards/BoardsContext';
 import { supabase } from '@/lib/supabase/client';
+import { accessLabelForScopes, type ApiKeyAccessMode } from '@/lib/apiKeys/accessModes';
+import { apiKeysRequest, createOrganizationApiKey, type ApiKeyRow } from '@/lib/apiKeys/client';
 import { isAutomaticWonStage, isLostBoardStage } from '@/lib/boards/boardOutcome';
 
 import { SettingsSection } from './SettingsSection';
-
-type ApiKeyRow = {
-  id: string;
-  name: string;
-  key_prefix: string;
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
-};
-
-/**
- * Chaves da API SEMPRE pela rota /api/api-keys, escopada pela organização da
- * aba (header x-org-id): a consulta direta à tabela e a RPC create_api_key
- * usavam a organização do PERFIL e mostravam/criavam chaves de outra organização.
- */
-async function apiKeysRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: 'include', ...init });
-  const body = await res.json().catch(() => null);
-  if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
-  return body as T;
-}
+import { ApiKeyAccessField } from './ApiKeyAccessField';
 
 /**
  * Componente React `ApiKeysSection`.
@@ -48,6 +30,7 @@ export const ApiKeysSection: React.FC = () => {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ApiKeyRow | null>(null);
   const [newKeyName, setNewKeyName] = useState('n8n');
+  const [accessMode, setAccessMode] = useState<ApiKeyAccessMode>('full');
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdPrefix, setCreatedPrefix] = useState<string | null>(null);
   const [apiKeyToken, setApiKeyToken] = useState<string>(''); // token completo (apenas em memória)
@@ -117,18 +100,10 @@ export const ApiKeysSection: React.FC = () => {
     setCreatedPrefix(null);
     setTestResult(null);
     try {
-      const body = await apiKeysRequest<{ data: ApiKeyRow & { token?: string } }>('/api/api-keys', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      const row = body.data as { token?: string; key_prefix?: string } | undefined;
-      const token = row?.token as string | undefined;
-      const prefix = row?.key_prefix as string | undefined;
-      if (!token || !prefix) throw new Error('Resposta inválida ao criar chave');
+      const { token, key_prefix: prefix } = await createOrganizationApiKey(name, accessMode);
       setCreatedToken(token);
       setCreatedPrefix(prefix);
-      setApiKeyToken(token);
+      setApiKeyToken(accessMode === 'full' ? token : '');
       addToast('Chave criada. Copie agora — ela aparece só uma vez.', 'success');
       await loadKeys();
     } catch (e: any) {
@@ -183,7 +158,7 @@ export const ApiKeysSection: React.FC = () => {
   };
 
   const testMe = async () => {
-    const token = apiKeyToken.trim() || createdToken?.trim() || '';
+    const token = apiKeyToken.trim();
     if (!token) {
       addToast('Cole uma API key (ou crie uma nova) para testar.', 'warning');
       return;
@@ -239,7 +214,7 @@ export const ApiKeysSection: React.FC = () => {
   }, [selectedBoard, selectedToStageId]);
 
   const curlExample = useMemo(() => {
-    const token = (apiKeyToken.trim() || createdToken?.trim() || '') || 'SUA_API_KEY';
+    const token = apiKeyToken.trim() || 'SUA_API_KEY';
     if (action === 'create_lead') {
       const name = (leadName || 'Lead').replaceAll('"', '\\"');
       const email = (leadEmail || 'teste@exemplo.com').replaceAll('"', '\\"');
@@ -274,7 +249,6 @@ export const ApiKeysSection: React.FC = () => {
     action,
     activitiesUrl,
     contactsUrl,
-    createdToken,
     dealsUrl,
     selectedBoardKey,
     selectedBoardId,
@@ -297,7 +271,7 @@ export const ApiKeysSection: React.FC = () => {
   ]);
 
   const runActionTest = async () => {
-    const token = (apiKeyToken.trim() || createdToken?.trim() || '') || '';
+    const token = apiKeyToken.trim();
     if (!token) {
       addToast('Cole uma API key (ou crie uma nova) para testar.', 'warning');
       return;
@@ -436,6 +410,7 @@ export const ApiKeysSection: React.FC = () => {
             A chave é da sua conta. O assistente só usa ela para montar o “copiar/colar” e testar.
           </div>
 
+          <ApiKeyAccessField value={accessMode} onChange={setAccessMode} disabled={creating} />
           <div className="flex gap-2">
             <input
               value={newKeyName}
@@ -858,6 +833,7 @@ export const ApiKeysSection: React.FC = () => {
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-mono">
                       {k.key_prefix}…
                     </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">{accessLabelForScopes(k.scopes)}</div>
                     <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                       Último uso: {k.last_used_at ? new Date(k.last_used_at).toLocaleString('pt-BR') : '—'}
                     </div>

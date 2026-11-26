@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Acompanhamento dos agentes de atendimento pelo AgentMaker
+- **Tipo:** Novo
+- **O que mudou:** o administrador escolhe quais agentes o squad pode acompanhar. O Monitor consulta os atendimentos, e uma chave separada permite ao Engenheiro revisar ou restaurar o roteiro. O CRM registra o original e as alterações manuais e do squad.
+- **Por quê:** revisar atendimentos e melhorar o roteiro com histórico e controle de acesso por escritório.
+- **Quem:** solicitado por Samuel e implementado por Codex.
+- **Banco:** `20261126210000_mcp_ai_agents.sql` e `docs/mcp-ai-agents-rollback.sql`.
+- **Para voltar:** `prod-pre-mcp-agentes-ia` (criar na publicação).
+
 ### 26/11/2026 · Confirmação do retorno combinado em linguagem natural
 - **Tipo:** Melhoria
 - **O que mudou:** quando o lead combina um horário de retorno, a confirmação no WhatsApp sai como "Combinado! Te chamo amanhã (26/11) às 9h.", sem fuso e sem ano (o ano só aparece quando o retorno cai em outro ano). A frase diz "hoje", "amanhã" ou "dia 27/11", e os minutos só aparecem quando não são zero. Se a IA já tinha escrito "Combinado", a palavra não se repete. A instrução da IA foi ajustada para confirmar no mesmo formato. Vale para todos os escritórios que usam retorno combinado.

@@ -3,15 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   rpcCalls: 0,
   inserts: [] as Array<Record<string, unknown>>,
-  valid: new Map<string, { api_key_id: string; api_key_prefix: string; organization_id: string; organization_name: string }>(),
+  valid: new Map<string, { api_key_id: string; api_key_prefix: string; organization_id: string; organization_name: string; scopes?: string[] | null }>(),
 }));
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    rpc: (_fn: string, args: { p_token: string }) => ({
+    rpc: (fn: string, args: { p_token: string }) => ({
       maybeSingle: async () => {
         state.rpcCalls += 1;
-        return { data: state.valid.get(args.p_token) ?? null, error: null };
+        const row = state.valid.get(args.p_token);
+        const allowed = fn === 'validate_mcp_api_key' || (fn === 'validate_api_key' && row?.scopes == null);
+        return { data: allowed ? row ?? null : null, error: null };
       },
     }),
   }),
@@ -49,6 +51,18 @@ describe('limites da API pública', () => {
     resetAuditThrottle();
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it('mantém as chaves do squad exclusivas do MCP', async () => {
+    state.valid.set('monitor', { ...state.valid.get('boa')!, scopes: ['ai_agents:read'] });
+    expect(await authPublicApi(req('monitor'))).toMatchObject({ ok: false, status: 401 });
+    expect(await authPublicApi(req('monitor'), 'mcp')).toMatchObject({ ok: true, scopes: ['ai_agents:read'] });
+  });
+
+  it('exige informação explícita de escopo no MCP, inclusive para chaves completas', async () => {
+    expect(await authPublicApi(req('boa'), 'mcp')).toMatchObject({ ok: false });
+    state.valid.set('boa', { ...state.valid.get('boa')!, scopes: null });
+    expect(await authPublicApi(req('boa'), 'mcp')).toMatchObject({ ok: true, scopes: null });
+  });
 
   it('chave válida passa até o limite por minuto e depois recebe 429', async () => {
     for (let i = 0; i < 3; i++) expect((await authPublicApi(req('boa'))).ok).toBe(true);
