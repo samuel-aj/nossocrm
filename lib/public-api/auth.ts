@@ -3,7 +3,7 @@ import { logSecurityEvent, requestMeta, shouldLogThrottled } from '@/lib/securit
 import { LIMITS, logRateLimitExceeded, rateLimit, rateLimitHeaders, rateLimitMessage, rateLimitPeek, type RateLimitResult } from '@/lib/security/rateLimit';
 
 export type PublicApiAuthResult =
-  | { ok: true; organizationId: string; organizationName: string; apiKeyId: string; apiKeyPrefix: string }
+  | { ok: true; organizationId: string; organizationName: string; apiKeyId: string; apiKeyPrefix: string; scopes: string[] | null }
   | { ok: false; status: number; body: { error: string; code?: string; retry_after?: number }; headers?: Record<string, string> };
 
 function safePath(url: string): string {
@@ -30,7 +30,7 @@ function limited(result: RateLimitResult): PublicApiAuthResult {
   };
 }
 
-export async function authPublicApi(request: Request): Promise<PublicApiAuthResult> {
+export async function authPublicApi(request: Request, audience: 'rest' | 'mcp' = 'rest'): Promise<PublicApiAuthResult> {
   const token = request.headers.get('x-api-key') || '';
   if (!token.trim()) {
     return { ok: false, status: 401, body: { error: 'Missing X-Api-Key', code: 'AUTH_MISSING' } };
@@ -56,11 +56,13 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     api_key_prefix: string;
     organization_id: string;
     organization_name: string;
+    scopes?: string[] | null;
   };
 
   // Supabase RPC return types are not strongly typed here (no generated Database types),
   // so we validate the shape defensively.
-  const { data, error } = await sb.rpc('validate_api_key', { p_token: token }).maybeSingle();
+  const rpc = audience === 'mcp' ? 'validate_mcp_api_key' : 'validate_api_key';
+  const { data, error } = await sb.rpc(rpc, { p_token: token }).maybeSingle();
   const row = (data ?? null) as ValidateApiKeyRow | null;
   if (
     error ||
@@ -69,7 +71,9 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     !row.organization_id.trim() ||
     typeof row.organization_name !== 'string' ||
     typeof row.api_key_id !== 'string' ||
-    typeof row.api_key_prefix !== 'string'
+    typeof row.api_key_prefix !== 'string' ||
+    (audience === 'mcp' && row.scopes !== null &&
+      !(Array.isArray(row.scopes) && row.scopes.every(scope => typeof scope === 'string')))
   ) {
     // Chave que não existe (ou revogada): fica registrado, no máximo uma vez
     // por minuto por IP, para não virar porta de sobrecarga do banco. Falha do
@@ -105,6 +109,7 @@ export async function authPublicApi(request: Request): Promise<PublicApiAuthResu
     apiKeyPrefix: row.api_key_prefix,
     organizationId: row.organization_id,
     organizationName: row.organization_name,
+    scopes: row.scopes ?? null,
   };
 }
 

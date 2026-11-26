@@ -94,6 +94,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
         const { error: scriptError } = await auth.admin
           .from('wa_ai_agents')
           .update({ system_prompt: rewritten, updated_at: new Date().toISOString() })
+          .setHeader('x-crm-prompt-editor', auth.user.id)
           .eq('organization_id', orgId)
           .eq('id', id);
         if (scriptError) throw new Error(scriptError.message);

@@ -31,7 +31,7 @@ Regras do registro:
 | Área | Decisões |
 |---|---|
 | Acesso aos dados no banco | DS-01 a DS-11 |
-| Segredos e chaves | DS-12 a DS-17 |
+| Segredos e chaves | DS-12 a DS-17 e DS-34 |
 | Autenticação e contas | DS-18 a DS-20 |
 | Entrada e saída de rede | DS-21 a DS-27 |
 | Registro, operação e publicação | DS-28 a DS-33 |
@@ -286,3 +286,10 @@ Regras do registro:
 - **Aprovado por / quando:** Samuel, em produção em 24/11/2026.
 - **Onde fica:** `package.json`.
 - **Se remover:** voltar uma dessas bibliotecas para a versão antiga reabre a falha corrigida.
+
+### DS-34 · Chaves do squad por escritório e histórico dos roteiros
+- **Regra:** cada chave do squad pertence a um escritório e recebe um perfil de leitura ou leitura e revisão de roteiro. A lista pública de ferramentas e a execução respeitam o mesmo perfil. Mensagens, roteiros e versões só ficam disponíveis para agentes que um administrador habilitou. Cada revisão guarda o texto anterior e identifica a pessoa ou a chave. A referência de aprovação externa acompanha as alterações do squad.
+- **Por quê:** o monitor precisa consultar atendimentos. Apenas o perfil que revisa o roteiro precisa gravar uma versão. O isolamento por escritório, a máscara de telefone e a ausência de anexos reduzem os dados compartilhados.
+- **Solicitado por / quando:** implementação solicitada por Samuel em 26/11/2026.
+- **Onde fica:** autenticação da API pública, registro de ferramentas em `app/api/mcp`, ferramentas em `lib/mcp/aiAgents` e histórico protegido no Postgres.
+- **Se remover:** integrações podem receber acesso além do autorizado e alterações concorrentes de roteiro podem sobrescrever a revisão anterior.

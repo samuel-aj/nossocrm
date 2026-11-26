@@ -17,10 +17,14 @@ import { z } from 'zod';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { API_KEY_COLUMNS, getAuthedAdmin, makeApiKeyToken } from '@/lib/apiKeys/server';
+import { API_KEY_ACCESS_MODES, scopesForAccessMode } from '@/lib/apiKeys/accessModes';
 
 export const runtime = 'nodejs';
 
-const CreateSchema = z.object({ name: z.string().max(120).optional() }).strict();
+const CreateSchema = z.object({
+  name: z.string().max(120).optional(),
+  accessMode: z.enum(API_KEY_ACCESS_MODES).default('full'),
+}).strict();
 
 export async function GET() {
   const auth = await getAuthedAdmin();
@@ -39,8 +43,8 @@ export async function POST(req: Request) {
   if (!isAllowedOrigin(req)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   const auth = await getAuthedAdmin();
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-  const body = await req.json().catch(() => ({}));
-  const parsed = CreateSchema.safeParse(body ?? {});
+  const body = await req.json().catch(() => null);
+  const parsed = CreateSchema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid payload' }, { status: 422 });
   const name = (parsed.data.name ?? '').trim() || 'Integração';
   const { token, prefix, hash } = makeApiKeyToken();
@@ -50,6 +54,7 @@ export async function POST(req: Request) {
     .insert({
       organization_id: auth.organizationId,
       name,
+      scopes: scopesForAccessMode(parsed.data.accessMode),
       key_prefix: prefix,
       key_hash: hash,
       created_by: auth.userId,
@@ -64,7 +69,7 @@ export async function POST(req: Request) {
     organizationId: auth.organizationId,
     resourceType: 'api_key',
     resourceId: (data as { id?: string } | null)?.id,
-    details: { name, prefixo: prefix },
+    details: { name, prefixo: prefix, accessMode: parsed.data.accessMode },
     severity: 'warning',
   }, req);
   return NextResponse.json({ data: { ...data, token } }, { status: 201 });

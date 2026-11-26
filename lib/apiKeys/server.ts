@@ -6,7 +6,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createClient } from '@/lib/supabase/server';
 import { withTabOrg } from '@/lib/supabase/tabOrgScope';
 
-export const API_KEY_COLUMNS = 'id,name,key_prefix,created_at,last_used_at,revoked_at';
+export const API_KEY_COLUMNS = 'id,name,key_prefix,created_at,last_used_at,revoked_at,scopes';
 
 export type ApiKeysAuth = { userId: string; organizationId: string } | { error: string; status: number };
 

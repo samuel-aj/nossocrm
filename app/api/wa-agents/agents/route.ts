@@ -36,6 +36,7 @@ function toInsertRow(input: AgentInput, helperIds: string[]) {
     name: input.name,
     persona_name: input.persona_name ?? null,
     enabled: input.enabled,
+    squad_monitoring: input.squad_monitoring,
     connection_ids: input.connection_ids,
     provider: input.provider,
     model: input.model,

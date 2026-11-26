@@ -183,6 +183,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
   const { data, error } = await auth.admin
     .from('wa_ai_agents')
     .update(patch)
+    .setHeader('x-crm-prompt-editor', auth.user.id)
     .eq('id', id)
     .eq('organization_id', orgId)
     .select('*')

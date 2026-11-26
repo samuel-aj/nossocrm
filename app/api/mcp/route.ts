@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
 import { authPublicApi } from '@/lib/public-api/auth';
 import { createStaticAdminClient } from '@/lib/supabase/server';
-import { buildCrmMcpRegistry } from '@/lib/mcp/crmRegistry';
+import { buildCrmMcpRegistry, type CrmMcpRegistry } from '@/lib/mcp/crmRegistry';
 import { zodToJsonSchema2020 } from '@/lib/mcp/zodToJsonSchema';
 import { resolveMcpOwner } from '@/lib/mcp/whatsapp/access';
 import { addWhatsAppTools } from '@/lib/mcp/whatsapp/tools';
+import { addAiAgentTools } from '@/lib/mcp/aiAgents/tools';
+import { isOrgAdmin } from '@/lib/whatsapp/api';
+import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -45,7 +48,7 @@ async function authMcp(request: Request) {
   headers.set('x-api-key', apiKey);
   const normalized = new Request(request.url, { method: request.method, headers });
 
-  return await authPublicApi(normalized);
+  return await authPublicApi(normalized, 'mcp');
 }
 
 function toToolResult(payload: unknown, opts?: { isError?: boolean }) {
@@ -112,12 +115,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // Minimal context for MCP execution. Tool args can still include boardId/dealId/etc.
-  const registry = addWhatsAppTools(buildCrmMcpRegistry({
-    context: { organizationId: auth.organizationId },
-    userId: user.id,
-  }), { admin, user, apiKeyId: auth.apiKeyId });
-
   if (body.id === undefined) return new NextResponse(null, { status: 202 });
   if (body.method === 'ping') return NextResponse.json(jsonRpcResult(body.id, {}));
 
@@ -126,10 +123,21 @@ export async function POST(request: Request) {
     return NextResponse.json(
       jsonRpcResult(body.id, {
         protocolVersion: PROTOCOLS.includes(body.params?.protocolVersion) ? body.params.protocolVersion : PROTOCOLS[0],
-        serverInfo: { name: 'crmia-next-mcp', version: '0.2.0' },
+        serverInfo: { name: 'crmia-next-mcp', version: '0.3.0' },
         capabilities: { tools: { listChanged: false } },
       })
     );
+  }
+
+  const ctx = { admin, user, apiKeyId: auth.apiKeyId };
+  // Restricted keys start with an empty registry for both discovery and execution.
+  const registry: CrmMcpRegistry = auth.scopes === null
+    ? addWhatsAppTools(buildCrmMcpRegistry({ context: { organizationId: auth.organizationId }, userId: user.id }), ctx)
+    : { tools: [], toolByMcpName: {}, internalKeyByMcpName: {}, mcpNameByInternalKey: {} };
+  const wantsAgentTools = body.method === 'tools/list' ||
+    (body.method === 'tools/call' && typeof body.params?.name === 'string' && body.params.name.startsWith('crm.ai_agents.'));
+  if (wantsAgentTools && isOrgAdmin(user.role) && await isAiAgentsApproved(admin, auth.organizationId)) {
+    addAiAgentTools(registry, ctx, auth.scopes);
   }
 
   if (body.method === 'tools/list') {
@@ -151,10 +159,10 @@ export async function POST(request: Request) {
       return NextResponse.json(jsonRpcError(body.id, -32602, 'Invalid params: missing tool name'), { status: 400 });
     }
 
-    const tool = registry.toolByMcpName[toolName];
-    if (!tool) {
+    if (!Object.hasOwn(registry.toolByMcpName, toolName)) {
       return NextResponse.json(jsonRpcError(body.id, -32602, `Unknown tool: ${toolName}`), { status: 400 });
     }
+    const tool = registry.toolByMcpName[toolName];
 
     // Validate inputs using the underlying Zod schema when available.
     const schema: any = (tool as any).inputSchema;
