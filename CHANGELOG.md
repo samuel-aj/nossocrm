@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Confirmação do retorno combinado em linguagem natural
+- **Tipo:** Melhoria
+- **O que mudou:** quando o lead combina um horário de retorno, a confirmação no WhatsApp sai como "Combinado! Te chamo amanhã (26/11) às 9h.", sem fuso e sem ano (o ano só aparece quando o retorno cai em outro ano). A frase diz "hoje", "amanhã" ou "dia 27/11", e os minutos só aparecem quando não são zero. Se a IA já tinha escrito "Combinado", a palavra não se repete. A instrução da IA foi ajustada para confirmar no mesmo formato. Vale para todos os escritórios que usam retorno combinado.
+- **Por quê:** a frase antiga ("Combinado! Vou te chamar em 25/11/2026, 09:00 GMT-3.") soava robótica, e um escritório pediu um formato mais natural.
+- **Quem:** pedido de um escritório cliente, Claude Code fez (PR #89).
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-frase-retorno`.
+
 ### 26/11/2026 · Conferência dos dados antes de preparar um contrato
 - **Tipo:** Correção
 - **O que mudou:** Em resultados configurados para exigir dados, o agente guarda o que o cliente já informou e pergunta apenas o que falta. A equipe recebe uma tarefa de revisão se houver falha ao atualizar o negócio ou preparar o documento.
