@@ -23,6 +23,8 @@ import type { LeadChange } from './leadFields';
 import { loadLeadFormData } from './leadFormData';
 
 export type OutcomeActionsResult = {
+  /** A configured workflow failed; its manual review task was successfully created. */
+  manualReviewReason?: string;
   handoffAgentId?: string;
   approvalAgentId?: string;
   stopped?: boolean;
@@ -169,7 +171,11 @@ async function runAction(
       const registered = new Set(agent.ai_vars.map(v => v.name.toLowerCase()));
       const form = changes.some(c => c.recoverVariable && registered.has(c.recoverVariable)) ? await getLeadForm() : undefined;
       const recoverValue = form && ((key: string) => registered.has(key) ? form(key) : undefined);
-      const r = await applyLeadChanges(admin, { organizationId: orgId, dealId, changes, render: t => t, recoverValue });
+      const verifyPersisted = source.kind === 'outcome' && !!source.outcome.required_data?.length;
+      if (verifyPersisted && changes.some(c => c.field === 'custom_field' && c.mode === 'replace' && !c.value?.trim())) {
+        throw new Error('Uma alteração obrigatória ficou sem valor.');
+      }
+      const r = await applyLeadChanges(admin, { organizationId: orgId, dealId, changes, render: t => t, recoverValue, verifyPersisted });
       if (r.problems.length > 0) {
         throw new Error(`${r.changed.length > 0 ? `alterado: ${r.changed.join(', ')}; ` : ''}não aplicado: ${r.problems.join('; ')}`);
       }
@@ -367,6 +373,15 @@ export async function executeActions(
     } catch (e) {
       const skipped = e instanceof ActionSkipped;
       input.runEvents.push({ type: 'action', at, pos, action: action.type, ok: false, ...(skipped ? { skipped: true } : {}), error: errorMessage(e), ...origin });
+      if (input.source.kind === 'outcome' && input.source.outcome.required_data?.length &&
+          (action.type === 'update_lead' || action.type === 'webhook' || action.type === 'create_task')) {
+        const reason = action.type === 'update_lead' ? 'Falha ao gravar os dados no negócio.' :
+          action.type === 'webhook' ? 'O sistema de destino não confirmou a preparação do documento.' : 'A tarefa de acompanhamento não foi registrada.';
+        await runAction(admin, { ...input, source: { ...input.source, summary: reason + ' Confira o negócio e conclua o atendimento manualmente.' } },
+          { type: 'create_task', title: 'Revisar atendimento · ' + input.agent.name, days: 0 }, result, getLeadForm);
+        pushEvent('manual_review_task_created', { reason });
+        return { stopped: true, manualReviewReason: reason };
+      }
     }
   }
   return result;

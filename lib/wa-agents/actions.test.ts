@@ -45,3 +45,21 @@ describe('ação de mover de etapa do agente de IA', () => {
     expect(h.filters).toContainEqual(['deals', 'id', autoLeadDealId]);
   });
 });
+
+it('cria revisão humana e interrompe a cadeia antes do webhook se a gravação obrigatória falhar', async () => {
+  const insert = vi.fn().mockResolvedValue({ error: null });
+  const from = vi.fn(() => ({ insert }));
+  const ctx = { org: { name: 'Teste' }, conversation: { id: 'c', organization_id: 'org' }, deal: null, contact: null } as unknown as ConversationContext;
+  const agent = { id: 'a', name: 'Atendimento', ai_vars: [] } as unknown as AgentRow;
+  const runEvents: unknown[] = [];
+  const result = await executeOutcomeActions({ from } as unknown as SupabaseClient, {
+    agent, ctx, runEvents, summary: 'Proposta aceita',
+    outcome: { key: 'contrato', label: 'Contrato', description: '', required_data: [{ key: 'nome', label: 'nome' }], actions: [
+      { type: 'update_lead', changes: [{ field: 'custom_field', key: 'nome', mode: 'replace', value: 'Pessoa' }] },
+      { type: 'webhook', url: 'https://example.com/webhook' }, { type: 'stop' },
+    ] },
+  });
+  expect(result).toMatchObject({ stopped: true, manualReviewReason: 'Falha ao gravar os dados no negócio.' });
+  expect(insert).toHaveBeenCalledWith(expect.objectContaining({ type: 'task', description: expect.stringContaining('Falha ao gravar') }));
+  expect(runEvents).not.toContainEqual(expect.objectContaining({ action: 'webhook' }));
+});

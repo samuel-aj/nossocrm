@@ -129,6 +129,12 @@ export const OutcomeSchema = z.object({
   key: z.string().regex(/^[a-z0-9_-]{1,40}$/),
   label: z.string().min(1).max(80),
   description: z.string().max(500).default(''),
+  required_data: z.array(z.object({
+    key: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+    label: z.string().trim().min(1).max(80),
+    format: z.enum(['br_document_issuer', 'br_identity', 'br_cpf', 'br_state', 'br_postcode', 'phone', 'email']).optional(),
+  })).max(30).optional(),
+  acknowledgement: z.string().trim().min(1).max(500).optional(),
   actions: z.array(OutcomeActionSchema).default([]),
 });
 export type Outcome = z.infer<typeof OutcomeSchema>;
