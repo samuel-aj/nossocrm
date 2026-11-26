@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 26/11/2026 · Registro das decisões de segurança
+- **Tipo:** Infraestrutura
+- **O que mudou:** novo documento [docs/decisoes-seguranca.md](docs/decisoes-seguranca.md) com 33 decisões: o que cada regra faz, por quê, quem aprovou, quando entrou, onde fica e o que acontece se for removida. Regra no `AGENTS.md` para manter o documento em dia.
+- **Por quê:** as razões das regras estavam espalhadas em conversas e comentários de código, e uma proteção que parece sobrar podia ser removida por engano.
+- **Quem:** Samuel pediu, Claude Code fez.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-decisoes-seg`.
+
 As entradas de 24 e 25/11 feitas por outras sessões (Codex e PRs) foram escritas depois, a partir do título e da descrição dos commits.
 
 ### 25/11/2026 · Registro de alterações (este arquivo)
