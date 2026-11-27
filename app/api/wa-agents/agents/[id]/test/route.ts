@@ -21,6 +21,7 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { loadAgent, normalizeAgentRow } from '@/lib/wa-agents/context';
 import { WaAgentError } from '@/lib/wa-agents/errors';
+import { SimulatedReturnSchema } from '@/lib/wa-agents/scheduledReturnTime';
 import { agentWithDraft, testAgentReply } from '@/lib/wa-agents/test';
 import { AgentInputSchema, type AgentRow } from '@/lib/wa-agents/types';
 import {
@@ -39,6 +40,7 @@ export const maxDuration = 120;
 
 const BodySchema = z.object({
   sessionId: z.string().uuid().optional(),
+  pendingReturn: SimulatedReturnSchema.optional(),
   // true requests the editor's fixed voice sample; a string previews the exact simulator line.
   previewVoice: z.union([z.literal(true), z.string().trim().min(1).max(8000)]).optional(),
   signatureEvent: z.literal('signed').optional(),
@@ -95,6 +97,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       agent,
       messages: parsed.data.messages,
       state: parsed.data.state,
+      pendingReturn: parsed.data.pendingReturn,
       signatureEvent: parsed.data.signatureEvent,
       contractState: parsed.data.contractState,
       session: { id: sessionId, userId: auth.user.id },

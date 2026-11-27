@@ -28,6 +28,13 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Confirmações curtas preservam o retorno combinado
+- **Tipo:** Correção
+- **O que mudou:** o robô mantém o horário combinado quando o cliente responde “blz”, agradece, envia um emoji ou deixa dúvida sobre o que deseja. Uma remarcação confirmada substitui a reserva anterior. Um pedido claro de cancelamento encerra o retorno.
+- **Por quê:** uma confirmação de recebimento cancelava o agendamento e o cliente ficava esperando.
+- **Quem:** solicitado por Gézer e Samuel, implementado pelo Codex.
+- **Banco:** `20261127190000_keep_agreed_robot_return.sql`. Reversão em `docs/retorno-combinado-confirmacao-rollback.sql`.
+- **Para voltar:** use o ponto de restauração `prod-pre-retorno-combinado-confirmacao` previsto para a publicação e siga a ordem indicada no SQL de reversão.
 ### 27/11/2026 · Avisos antigos de consumo sem repetição na tela
 - **Tipo:** Correção
 - **O que mudou:** pendências antigas de consumo da IA e de conexão continuam no sino, mas deixam de reaparecer com som ou aviso na tela ao reabrir o CRM ou trocar de escritório. Avisos novos usam a mesma proteção contra repetição entre abas para som, notificação do computador e aviso na tela.

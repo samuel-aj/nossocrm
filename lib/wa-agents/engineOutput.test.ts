@@ -152,6 +152,27 @@ beforeEach(() => {
 });
 const run = () => runAgentOnConversation({ organizationId: org, conversationId: 'conv', trigger: 'inbound', skipBuffer: true });
 
+describe('intenção de alterar um retorno combinado', () => {
+  it.each([
+    { forwarded: true, media_type: null },
+    { forwarded: false, media_type: 'document' },
+  ])('preserva a reserva se o texto de cancelamento vier de terceiros: %o', async source => {
+    const text = 'Cancele o retorno';
+    h.agent!.tools.scheduled_return_bot_id = org;
+    h.messages.push({ ...incoming, id: 'third-party', created_at: '2026-10-01T12:01:00.000Z',
+      ...source, body: text, transcription: source.media_type ? text : null });
+    h.history.mockResolvedValue([{ role: 'user', content: text }]);
+    const rpc = vi.spyOn(h.db, 'rpc');
+    h.generate.mockImplementation(async ({ tools }) => {
+      expect(await tools.cancelar_retorno.execute({}, {})).toMatchObject({ ok: false });
+      return draft('Recebi, obrigado.', false);
+    });
+    expect((await run()).status).toBe('ok');
+    expect(h.generate).toHaveBeenCalled();
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain('cancel_scheduled_robot_return');
+  });
+});
+
 describe('inscrição da OAB na saída do agente', () => {
   const question = 'Qual a OAB da Dra. Ana Exemplo?';
   const registered = { professionalName: 'Ana Exemplo', state: 'MS', number: '12345' };
@@ -940,7 +961,38 @@ describe('validação no envio real e no simulador', () => {
     expect(h.log.mock.calls[0][1]).toMatchObject({ status: 'error', events: [expect.objectContaining({ type: 'output_checked', status: 'blocked' })] });
     expect(h.send).not.toHaveBeenCalled(); expect(h.action).not.toHaveBeenCalled();
   });
-  it('simulador consulta, remarca e cancela retorno apenas em memória, sem executar robô', async () => {
+  it('painel de teste conserva a reserva entre rodadas da sessão e só a altera com evidência nova do cliente', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
+    try {
+      const agent = { ...h.agent!, tools: { ...h.agent!.tools, scheduled_return_bot_id: '11111111-1111-4111-8111-111111111111' } };
+      const session = { id: '11111111-2222-4111-8111-111111111111', userId: 'test-user' };
+      const simulate = (message: string, pendingReturn?: import('./scheduledReturnTime').SimulatedReturn, agentForTest = agent, sessionForTest = session) =>
+        testAgentReply(h.db, { organizationId: org, agent: agentForTest, session: sessionForTest, pendingReturn, messages: [{ role: 'user', text: message }] });
+      const rpc = vi.spyOn(h.db, 'rpc');
+      const booked = await simulate('Me chama amanhã às 19h');
+      const first = booked.pendingReturn!;
+      expect(first).toMatchObject({ agent_id: agent.id, session_id: session.id, bot_id: agent.tools.scheduled_return_bot_id });
+      h.generate.mockImplementation(async ({ tools }) => {
+        const snapshot = await tools.consultar_retorno.execute({}, {});
+        expect(snapshot).toMatchObject({ pending: first });
+        expect(await tools.cancelar_retorno.execute({}, {})).toMatchObject({ ok: false });
+        expect(await tools.agendar_retorno.execute({ local: '2026-11-06T22:00', timezone: 'America/Manaus', context: 'Mensagem curta', confirmed: true }, {}))
+          .toMatchObject({ ok: false, preserved: true });
+        return draft('Até lá!', false);
+      });
+      expect((await simulate('Blz', first)).pendingReturn).toEqual(first);
+      const rescheduled = (await simulate('Remarca o retorno para amanhã às 20h', first)).pendingReturn!;
+      expect(rescheduled.scheduled_for).not.toEqual(first.scheduled_for);
+      h.generate.mockResolvedValue(draft('Entendido.', false));
+      expect((await simulate('Não precisa mais me chamar', rescheduled)).pendingReturn).toBeNull();
+      expect((await simulate('Blz', first, agent, { ...session, id: '22222222-2222-4222-8222-222222222222' })).pendingReturn).toBeNull();
+      expect((await simulate('Blz', first, { ...agent, id: 'outro' })).pendingReturn).toBeNull();
+      expect((await simulate('Blz', first, { ...agent, tools: { ...agent.tools, scheduled_return_bot_id: 'outro' } })).pendingReturn).toBeNull();
+      expect(rpc).not.toHaveBeenCalled();
+      expect(h.send).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it('simulador preserva a hora combinada contra alterações contraditórias na mesma rodada, sem executar robô', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05T12:00:00Z'));
     try {
       h.agent!.tools = { ...h.agent!.tools, scheduled_return_bot_id: '11111111-1111-4111-8111-111111111111' };
@@ -950,10 +1002,9 @@ describe('validação no envio real e no simulador', () => {
         expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ simulated: true, pending: null });
         expect(await tools.agendar_retorno.execute(input, {})).toMatchObject({ simulated: true, scheduledAt: '2026-11-07T18:00:00.000Z' });
         expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: { scheduled_for: '2026-11-07T18:00:00.000Z' } });
-        await tools.agendar_retorno.execute({ ...input, local: '2026-11-08T14:00' }, {});
-        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: { scheduled_for: '2026-11-08T18:00:00.000Z' } });
-        expect(await tools.cancelar_retorno.execute({}, {})).toMatchObject({ simulated: true, cancelled: 1 });
-        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: null });
+        expect(await tools.agendar_retorno.execute({ ...input, local: '2026-11-08T14:00' }, {})).toMatchObject({ ok: false, preserved: true });
+        expect(await tools.cancelar_retorno.execute({}, {})).toMatchObject({ ok: false });
+        expect(await tools.consultar_retorno.execute({}, {})).toMatchObject({ pending: { scheduled_for: '2026-11-07T18:00:00.000Z' } });
         return draft('Teste de retorno concluído.', false);
       });
       await testAgentReply(h.db, { organizationId: org, agent: h.agent!, messages: [{ role: 'user', text: 'Retorne sábado às 14h.' }] });

@@ -97,10 +97,13 @@ export async function checkProactiveFollowup(admin: SupabaseClient, orgId: strin
     return { kind: 'allowed' };
   } else {
     const { data: returns, error: returnError } = await admin.from('wa_bot_runs')
-      .select('scheduled_for, scheduled_anchor').eq('organization_id', orgId).eq('conversation_id', conversationId)
-      .in('status', ['running', 'waiting_reply']).not('scheduled_for', 'is', null).limit(1).maybeSingle();
+      .select('scheduled_for, scheduled_anchor, scheduled_started_at').eq('organization_id', orgId).eq('conversation_id', conversationId)
+      .in('status', ['running', 'waiting_reply']).not('scheduled_for', 'is', null)
+      .order('scheduled_started_at', { ascending: false, nullsFirst: true }).limit(1).maybeSingle();
     if (returnError) throw new Error(returnError.message);
-    if (returns?.scheduled_for && (!lastInbound || (returns.scheduled_anchor && Date.parse(lastInbound) <= Date.parse(returns.scheduled_anchor))))
+    // A pending appointment owns the time slot even if the customer acknowledged it later.
+    const waitingForReturn = returns?.scheduled_started_at == null;
+    if (returns?.scheduled_for && (waitingForReturn || !lastInbound || (returns.scheduled_anchor && Date.parse(lastInbound) <= Date.parse(returns.scheduled_anchor))))
       return { kind: 'defer', until: new Date(Math.max(Date.parse(returns.scheduled_for), now.getTime() + 60_000)).toISOString() };
   }
   const allowed = await followupAllowedAt(admin, orgId, now);

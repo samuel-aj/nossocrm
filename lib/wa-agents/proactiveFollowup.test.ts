@@ -113,6 +113,25 @@ describe('retorno explicitamente combinado', () => {
     expect(await checkProactiveFollowup(db(rows), 'org', 'conv', { anchor }, new Date(now.getTime() - 1000)))
       .toEqual({ kind: 'defer', until: new Date(now.getTime() + 59000).toISOString() });
   });
+  it('mantém o follow-up de silêncio adiado após confirmação do horário combinado', async () => {
+    const confirmedAt = '2026-11-06T18:00:00Z';
+    const updated = { ...rows, wa_conversations: { ...bound, last_inbound_at: confirmedAt },
+      wa_bot_runs: { ...saved, scheduled_started_at: null } };
+    expect(await checkProactiveFollowup(db(updated), 'org', 'conv', { anchor: confirmedAt }, now))
+      .toEqual({ kind: 'defer', until: new Date(now.getTime() + 60_000).toISOString() });
+  });
+  it('executa o retorno com a confirmação recebida antes de o robô iniciar', async () => {
+    const confirmedAt = '2026-11-06T18:00:00Z';
+    const started = { ...rows, wa_conversations: { ...bound, last_inbound_at: confirmedAt },
+      wa_bot_runs: { ...saved, scheduled_started_at: now.toISOString(), scheduled_anchor: confirmedAt } };
+    expect(await checkProactiveFollowup(db(started), 'org', 'conv', { ...context, anchor: confirmedAt }, now))
+      .toEqual({ kind: 'allowed' });
+  });
+  it('preserva a proteção contra resposta nova durante um retorno já iniciado', async () => {
+    const started = { ...rows, wa_conversations: { ...bound, last_inbound_at: now.toISOString() },
+      wa_bot_runs: { ...saved, scheduled_started_at: now.toISOString() } };
+    expect((await checkProactiveFollowup(db(started), 'org', 'conv', context, now)).kind).toBe('cancel');
+  });
   it('aceita timestamps equivalentes com formatos diferentes', async () => {
     expect(await checkProactiveFollowup(db({ ...rows, wa_bot_runs: { ...saved, scheduled_anchor: '2026-11-05T10:00:00+00:00' } }), 'org', 'conv', context, now))
       .toEqual({ kind: 'allowed' });

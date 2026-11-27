@@ -1,4 +1,5 @@
-import { resolveReturnTime } from './scheduledReturnTime';
+import { explicitlyEndsReturn } from './agreedReturn';
+import { resolveReturnTime, type SimulatedReturn } from './scheduledReturnTime';
 import { loadFollowupCalendar } from './followupCalendarStore';
 /**
  * Teste de um agente no painel: mesma montagem de prompt e ferramentas, com
@@ -69,6 +70,7 @@ export function agentWithDraft(
 }
 
 export type TestAgentReplyResult = {
+  pendingReturn?: SimulatedReturn | null;
   voiceLines?: number[];
   contractReviewKey?: string;
   text: string;
@@ -145,7 +147,7 @@ export function toModelMessages(messages: TestMessage[], trigger: 'reply' | 'sig
   return out.map(m => ({ role: m.role, content: m.content }) as ModelMessage);
 }
 
-type TestInput = { organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown>; signatureEvent?: 'signed'; contractState?: 'invited'|'signed'; session?: { id: string; userId: string } };
+type TestInput = { pendingReturn?: SimulatedReturn; organizationId: string; agent: AgentRow; messages: TestMessage[]; state?: Record<string, unknown>; signatureEvent?: 'signed'; contractState?: 'invited'|'signed'; session?: { id: string; userId: string } };
 export async function testAgentReply(
   admin: SupabaseClient,
   input: TestInput
@@ -207,7 +209,10 @@ async function testAgentReplyWithUsage(
   let helperCalls = 0;
   let knowledgeCalls = 0;
   // Local to this simulation: tool calls can inspect/reschedule/cancel without reserving a real run.
-  let simulatedReturn: { id: string; scheduled_for: string; scheduled_timezone: string; bot_id: string } | null = null;
+  const prior = input.pendingReturn;
+  let simulatedReturn: SimulatedReturn | null = prior && input.session && prior.session_id === input.session.id &&
+    prior.agent_id === agent.id && prior.bot_id === agent.tools.scheduled_return_bot_id &&
+    Date.parse(prior.scheduled_for) > Date.now() && !explicitlyEndsReturn(messages) ? prior : null;
   let contractReviewKey: string | undefined;
   const runtime: AgentToolRuntime = {
     ...(agent.tools?.zapsign_template_token ? {
@@ -220,10 +225,11 @@ async function testAgentReplyWithUsage(
     } : {}),
     scheduledReturn: {
       inspect: async () => ({ now: new Date().toISOString(), timezone: (await loadFollowupCalendar(admin, organizationId)).timezone, pending: simulatedReturn, simulated: true }),
-      schedule: async input => {
-        const at = resolveReturnTime(input);
-        simulatedReturn = { id: 'simulated-return', scheduled_for: at, scheduled_timezone: input.timezone, bot_id: agent.tools?.scheduled_return_bot_id ?? '' };
-        return { ok: true, simulated: true, id: simulatedReturn.id, scheduledAt: at, timezone: input.timezone, local: input.local, calendarException: true };
+      schedule: async args => {
+        const at = resolveReturnTime(args);
+        simulatedReturn = { id: 'simulated-return', scheduled_for: at, scheduled_timezone: args.timezone,
+          bot_id: agent.tools?.scheduled_return_bot_id ?? '', agent_id: agent.id, session_id: input.session?.id ?? '' };
+        return { ok: true, simulated: true, id: simulatedReturn.id, scheduledAt: at, timezone: args.timezone, local: args.local, calendarException: true };
       },
       cancel: async () => {
         const cancelled = simulatedReturn ? 1 : 0;
@@ -321,7 +327,7 @@ async function testAgentReplyWithUsage(
     // The UI applies saved-data calls to simulated state. Return only the effective
     // contract tool on a suspended turn; the run log retains the full trace above.
     const appliedCalls = gen.contractWait ? gen.toolCalls.filter(call => call.tool === 'contrato_zapsign') : gen.toolCalls;
-    return { text: gen.text, lines, voiceLines, toolCalls: appliedCalls, usage: gen.usage, segments, media, contractReviewKey };
+    return { text: gen.text, lines, voiceLines, toolCalls: appliedCalls, usage: gen.usage, segments, media, contractReviewKey, pendingReturn: simulatedReturn };
   } catch (e) {
     // A failed generation/safety check produced no visible simulation result.
     // Never touch another request's receipt, even when it used the same session.

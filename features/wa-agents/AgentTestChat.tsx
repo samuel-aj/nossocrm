@@ -14,7 +14,7 @@ import { Send, Loader2, Eraser, Wrench, Timer } from 'lucide-react';
 import { useToast } from '@/context/ToastContext';
 import { DEFAULT_AGENT_TYPING, type AgentInput } from '@/lib/wa-agents/types';
 import { typingDelayMs } from '@/lib/wa-agents/typing';
-import { useTestWaAgent, type WaTestMessage } from './useWaAgents';
+import { useTestWaAgent, type WaTestMessage, type WaTestResult } from './useWaAgents';
 import { VoicePreview } from './VoicePreview';
 import { BTN_PRIMARY, BTN_SMALL, INPUT_CLASS, Notice, Toggle, errorMessage, newId } from './ui';
 
@@ -117,6 +117,7 @@ export const AgentTestChat: React.FC<{
   /** Cada envio recebe um número; revelação de envio antigo para sozinha */
   const runRef = useRef(0);
   const sessionRef = useRef<string | null>(null);
+  const pendingReturn = useRef<WaTestResult['pendingReturn']>(null);
 
   // Sempre a configuração que está na tela agora (o painel fica montado ao lado do editor)
   const draftRef = useRef(draft);
@@ -147,6 +148,7 @@ export const AgentTestChat: React.FC<{
       const result = await test.mutateAsync({
         sessionId: sessionRef.current ??= crypto.randomUUID(),
         messages: history,
+        pendingReturn: pendingReturn.current ?? undefined,
         ...(contractState !== 'none' ? {contractState} : {}),
         ...(signed ? {signatureEvent:'signed' as const} : {}),
         state: Object.keys(state).length ? state : undefined,
@@ -154,6 +156,7 @@ export const AgentTestChat: React.FC<{
       });
       if (runRef.current !== run) return;
       sessionRef.current = result.sessionId;
+      if (result.pendingReturn !== undefined) pendingReturn.current = result.pendingReturn;
       const lines = [...(result.lines.length > 0 ? result.lines : result.text ? [result.text] : [])];
       const created = result.toolCalls.some(call => toolName(call) === 'contrato_zapsign' &&
         (call as {output?:{criado?:boolean;simulado?:boolean}}).output?.criado && (call as {output?:{simulado?:boolean}}).output?.simulado);
@@ -220,6 +223,7 @@ export const AgentTestChat: React.FC<{
   const clear = () => {
     runRef.current++; // interrompe uma revelação em andamento
     sessionRef.current = null;
+    pendingReturn.current = null;
     setEntries([]);
     setState({});
     setContractState('none');

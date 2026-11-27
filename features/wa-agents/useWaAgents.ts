@@ -6,6 +6,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
+import type { SimulatedReturn } from '@/lib/wa-agents/scheduledReturnTime';
 import { createClient } from '@/lib/supabase/client';
 import type {
   AgentDocumentInputSchema,
@@ -56,7 +57,7 @@ export type WaRunsResult = { runs: RunRow[]; agents: Record<string, string> };
 export type WaBotRunsResult = { runs: BotRunRow[]; bots: Record<string, string> };
 
 export type WaTestMessage = { role: 'user' | 'assistant'; text: string; audio?: boolean; contractReviewKey?: string; media?: string[] };
-export type WaTestResult = { sessionId: string; text: string; lines: string[]; voiceLines?: number[]; toolCalls: unknown[]; usage: unknown; contractReviewKey?: string; media?: string[] };
+export type WaTestResult = { pendingReturn?: SimulatedReturn | null; sessionId: string; text: string; lines: string[]; voiceLines?: number[]; toolCalls: unknown[]; usage: unknown; contractReviewKey?: string; media?: string[] };
 
 /** IA na configuração: gerar do zero, melhorar o roteiro atual ou aplicar um ajuste pedido. */
 export type WaAssistMode = 'generate' | 'improve' | 'adjust';
@@ -264,6 +265,7 @@ export function useTestWaAgent(id: string | null | undefined) {
       messages: WaTestMessage[];
       signatureEvent?: 'signed';
       contractState?: 'invited'|'signed';
+      pendingReturn?: SimulatedReturn;
       state?: Record<string, unknown>;
       draft?: Partial<AgentInput>;
     }): Promise<WaTestResult> => {
@@ -279,6 +281,7 @@ export function useTestWaAgent(id: string | null | undefined) {
         voiceLines: json.voiceLines ?? [],
         toolCalls: json.toolCalls ?? [],
         contractReviewKey: json.contractReviewKey,
+        pendingReturn: json.pendingReturn,
         media: json.media ?? [],
         usage: json.usage ?? null,
       };

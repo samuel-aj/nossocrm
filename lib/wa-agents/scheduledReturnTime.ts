@@ -5,6 +5,13 @@ export const ReturnTimeSchema = z.object({
   context: z.string().trim().min(1).max(1000),
   confirmed: z.literal(true),
 });
+// The simulator echoes this state only to its own session. It never names a real bot run.
+export const SimulatedReturnSchema = z.object({
+  id: z.literal('simulated-return'), scheduled_for: z.string().datetime(),
+  scheduled_timezone: z.string().min(1).max(100), bot_id: z.string().uuid(),
+  agent_id: z.string().uuid(), session_id: z.string().uuid(),
+});
+export type SimulatedReturn = z.infer<typeof SimulatedReturnSchema>;
 export type ReturnTimeInput = z.infer<typeof ReturnTimeSchema>;
 
 /** Reject DST folds/gaps rather than silently moving the agreed appointment. */
