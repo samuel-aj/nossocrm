@@ -44,6 +44,8 @@ export const ALLOWED_MIME: Record<AttachmentKind, readonly string[]> = {
   audio: ['audio/mpeg', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/webm', 'audio/wav'],
   file: [
     'application/pdf', 'text/plain', 'text/csv',
+    // O Windows declara arquivos .csv com o tipo da planilha antiga do Excel.
+    'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   ],

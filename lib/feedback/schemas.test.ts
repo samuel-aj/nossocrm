@@ -43,6 +43,13 @@ describe('UploadRequestSchema', () => {
   it('recusa arquivo maior que 10 MB', () => {
     expect(UploadRequestSchema.safeParse({ fileName: 'a.png', mime: 'image/png', size: 10 * 1024 * 1024 + 1, kind: 'image' }).success).toBe(false);
   });
+  it('aceita CSV declarado como text/csv ou como planilha do Excel antigo (Windows)', () => {
+    for (const mime of ['text/csv', 'application/vnd.ms-excel']) {
+      expect(UploadRequestSchema.safeParse({ fileName: 'leads.csv', mime, size: 10, kind: 'file' }).success).toBe(true);
+      expect(CreateFeedbackSchema.safeParse({ body: '', attachments: [{ path: 'org/user/1_leads.csv', kind: 'file', mime, size: 10 }] }).success).toBe(true);
+    }
+    expect(UploadRequestSchema.safeParse({ fileName: 'leads.csv', mime: 'application/vnd.ms-excel', size: 10, kind: 'image' }).success).toBe(false);
+  });
   it('recusa tipo de arquivo que não combina com o kind', () => {
     expect(UploadRequestSchema.safeParse({ fileName: 'a.exe', mime: 'application/x-msdownload', size: 10, kind: 'file' }).success).toBe(false);
     expect(UploadRequestSchema.safeParse({ fileName: 'a.pdf', mime: 'application/pdf', size: 10, kind: 'image' }).success).toBe(false);
