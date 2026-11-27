@@ -37,6 +37,8 @@ export const FEEDBACK_LIMITS = {
   bytes: 10 * 1024 * 1024,
   audioSeconds: 180,
   perDay: 20,
+  /** Pedidos de URL de upload por usuário, por minuto (limitador em memória de cada instância). */
+  uploadsPerMinute: 30,
 } as const;
 
 export const ALLOWED_MIME: Record<AttachmentKind, readonly string[]> = {
