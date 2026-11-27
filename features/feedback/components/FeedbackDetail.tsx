@@ -7,11 +7,15 @@ import { useToast } from '@/context/ToastContext';
 import { FEEDBACK_KIND_LABEL, FEEDBACK_STATUS_LABEL } from '@/lib/feedback/constants';
 
 export function FeedbackDetail({ id }: { id: string }) {
-  const { data, isLoading } = useFeedbackDetail(id);
+  const { data, isError } = useFeedbackDetail(id);
   const reply = useReplyFeedback(id);
   const { addToast } = useToast();
   const [text, setText] = useState('');
-  if (isLoading || !data) return <p className="p-4 text-sm text-slate-500">Carregando…</p>;
+  if (!data) {
+    return isError
+      ? <p role="alert" className="p-4 text-sm text-red-600">Não foi possível abrir este pedido.</p>
+      : <p className="p-4 text-sm text-slate-500">Carregando…</p>;
+  }
 
   const send = async () => {
     if (!text.trim()) return;

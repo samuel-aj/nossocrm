@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Wrench } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -15,7 +15,10 @@ export function FeedbackPage() {
   const { profile } = useAuth();
   const isSuper = profile?.role === 'super_admin';
   const params = useSearchParams();
-  const [selected, setSelected] = useState<string | null>(params.get('pedido'));
+  const pedido = params.get('pedido');
+  const [selected, setSelected] = useState<string | null>(pedido);
+  // O sino leva para ?pedido=<id>: com a página já aberta, só a URL muda.
+  useEffect(() => { if (pedido) setSelected(pedido); }, [pedido]);
   const [view, setView] = useState<'meus' | 'todos'>('meus');
   const [status, setStatus] = useState('');
   const mine = useMyFeedback();
@@ -55,7 +58,7 @@ export function FeedbackPage() {
         )}
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        <FeedbackList rows={rows} isLoading={source.isLoading} selectedId={selected} onSelect={setSelected} showOrigin={view === 'todos'} />
+        <FeedbackList rows={rows} isLoading={source.isLoading} isError={source.isError} selectedId={selected} onSelect={setSelected} showOrigin={view === 'todos'} />
         {selected && <div className="rounded-xl border border-slate-200 dark:border-white/10"><FeedbackDetail id={selected} /></div>}
       </div>
     </div>
