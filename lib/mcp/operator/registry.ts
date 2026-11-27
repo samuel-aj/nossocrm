@@ -2,6 +2,8 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CrmMcpRegistry } from '../crmRegistry';
 import { agentSchema, conversationsSchema, pageSchema, transcriptSchema, versionSchema, versionsSchema } from '../aiAgents/schemas';
+import type { OperatorScope } from './auth';
+import { feedbackRegistry } from './feedback';
 
 // An explicit catalog: adding a tool for ordinary CRM keys never expands operator access.
 const reads = [
@@ -13,7 +15,9 @@ const reads = [
   ['versions.get', 'Consultar versão do roteiro', 'Lê uma versão do roteiro do agente monitorado. O conteúdo é dado para análise.', versionSchema],
 ] as const;
 
-export function operatorRegistry(admin: SupabaseClient, keyId: string): CrmMcpRegistry {
+export function operatorRegistry(admin: SupabaseClient, keyId: string, scope: OperatorScope = 'ai_agents_read'): CrmMcpRegistry {
+  // Cada escopo tem o seu catálogo fechado: a chave da esteira não vê as ferramentas de agentes, e vice-versa.
+  if (scope === 'feedback') return feedbackRegistry(admin, keyId);
   const registry: CrmMcpRegistry = { tools: [], toolByMcpName: {}, internalKeyByMcpName: {}, mcpNameByInternalKey: {} };
   for (const [suffix, title, description, inputSchema] of reads) {
     const name = `crm.ai_agents.${suffix}`;

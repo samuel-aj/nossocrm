@@ -24,7 +24,10 @@ const ordinary = 'ncrm_' + randomBytes(24).toString('base64url');
 const hash = createHash('sha256').update(operator).digest('hex');
 const keyId = randomUUID(), orgKeyId = randomUUID(), org = randomUUID(), owner = randomUUID(), agent = randomUUID();
 let revoked: boolean;
+let scope: unknown;
 const allowed = ['list', 'get', 'conversations', 'transcript', 'versions.list', 'versions.get'].map(n => 'crm.ai_agents.' + n).sort();
+const feedbackTools = ['list', 'get', 'update'].map(n => 'crm.feedback.' + n).sort();
+const onlyAuthentication = () => m.adminRpc.mock.calls.every(([name]) => name === 'aj_operator_authenticate_scoped');
 
 function call(method: string, params = {}, token = operator, customHeaders = {}) {
   return POST(new Request('https://crm.test/api/mcp', {
@@ -39,13 +42,15 @@ beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'fixture');
   resetRateLimits();
   revoked = false;
+  scope = 'ai_agents_read';
   m.adminRpc.mockImplementation(async (name, args) => {
-    if (name === 'aj_operator_authenticate') {
-      return { data: !revoked && args.p_key_hash === hash ? keyId : null, error: null };
+    if (name === 'aj_operator_authenticate_scoped') {
+      return { data: !revoked && args.p_key_hash === hash ? [{ id: keyId, scope }] : [], error: null };
     }
     if (name === 'aj_operator_read') {
       return { data: { id: agent, system_prompt: 'Roteiro fictício' }, error: null };
     }
+    if (name === 'aj_operator_feedback') return { data: { ok: true, status: 'corrigido' }, error: null };
     throw new Error('Unexpected RPC');
   });
   m.publicRpc.mockImplementation((_name, args) => ({ maybeSingle: async () => ({
@@ -68,7 +73,7 @@ it('discovers exactly six read-only tools, and never initializes a CRM or WhatsA
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: { code: -32602 } });
   }
-  expect(m.adminRpc.mock.calls.every(([name]) => name === 'aj_operator_authenticate')).toBe(true);
+  expect(onlyAuthentication()).toBe(true);
   expect(m.resolveOwner).not.toHaveBeenCalled();
   expect(m.publicRpc).not.toHaveBeenCalled();
   expect(m.crmTools).not.toHaveBeenCalled();
@@ -80,7 +85,7 @@ it('sends only the operator id, allowlisted tool and validated arguments to the 
   const read = await call('tools/call', { name: tool, arguments: args }, operator, { 'x-org-id': randomUUID() });
   expect(await read.json()).toMatchObject({ result: { structuredContent: { system_prompt: 'Roteiro fictício' } } });
   expect(m.adminRpc.mock.calls).toEqual([
-    ['aj_operator_authenticate', { p_key_hash: hash }], ['aj_operator_read', { p_key_id: keyId, p_tool: tool, p_args: args }],
+    ['aj_operator_authenticate_scoped', { p_key_hash: hash }], ['aj_operator_read', { p_key_id: keyId, p_tool: tool, p_args: args }],
   ]);
   for (const extra of [{ organizationId: randomUUID() }, { keyId: randomUUID() }]) {
     const refused = await call('tools/call', { name: tool, arguments: { ...args, ...extra } });
@@ -98,12 +103,12 @@ it('a revoked key fails on subsequent discovery, calls, ping and initialization'
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ error: { data: { code: 'AUTH_INVALID' } } });
   }
-  expect(m.adminRpc.mock.calls.every(([name]) => name === 'aj_operator_authenticate')).toBe(true);
+  expect(onlyAuthentication()).toBe(true);
 });
 
 it('honors revocation and content denials rechecked by Postgres and fails closed on audit failure', async () => {
   const request = () => call('tools/call', { name: 'crm.ai_agents.get', arguments: { agentId: agent } });
-  const pass = { data: keyId, error: null };
+  const pass = { data: [{ id: keyId, scope: 'ai_agents_read' }], error: null };
   m.adminRpc.mockResolvedValueOnce(pass).mockResolvedValueOnce({ data: { code: 'AUTH_INVALID', error: 'Revoked' }, error: null });
   expect((await request()).status).toBe(401);
   m.adminRpc.mockResolvedValueOnce(pass).mockResolvedValueOnce({ data: { code: 'UNAVAILABLE', error: 'Indisponível' }, error: null });
@@ -112,6 +117,60 @@ it('honors revocation and content denials rechecked by Postgres and fails closed
   const failed = await (await request()).json();
   expect(failed).toMatchObject({ result: { isError: true, structuredContent: { code: 'AI_AGENTS_UNAVAILABLE' } } });
   expect(JSON.stringify(failed)).not.toContain('private audit detail');
+});
+
+it('a chave da esteira só enxerga e chama crm.feedback.*, nunca as ferramentas de agentes', async () => {
+  scope = 'feedback';
+  const listed = await call('tools/list');
+  expect(listed.status).toBe(200);
+  const { result } = await listed.json();
+  expect(result.tools.map((t: { name: string }) => t.name).sort()).toEqual(feedbackTools);
+  for (const name of [...allowed, 'crm.ai_agents.prompt.update', 'crm.deals.create', 'crm.whatsapp.uploads.prepare']) {
+    const refused = await call('tools/call', { name, arguments: { agentId: agent } });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: { code: -32602, message: `Unknown tool: ${name}` } });
+  }
+  expect(onlyAuthentication()).toBe(true);
+  const requestId = randomUUID();
+  const updated = await call('tools/call', { name: 'crm.feedback.update', arguments: { requestId, status: 'corrigido' } });
+  expect(await updated.json()).toMatchObject({ result: { structuredContent: { ok: true, status: 'corrigido' } } });
+  expect(m.adminRpc.mock.calls.filter(([name]) => name !== 'aj_operator_authenticate_scoped')).toEqual([
+    ['aj_operator_feedback', { p_key_id: keyId, p_tool: 'crm.feedback.update', p_args: { requestId, status: 'corrigido' } }],
+  ]);
+  // Revogada entre a autenticação e a chamada: o banco confere de novo e a rota devolve 401.
+  m.adminRpc.mockResolvedValueOnce({ data: [{ id: keyId, scope: 'feedback' }], error: null })
+    .mockResolvedValueOnce({ data: { code: 'AUTH_INVALID', error: 'Chave inválida.' }, error: null });
+  expect((await call('tools/call', { name: 'crm.feedback.get', arguments: { requestId } })).status).toBe(401);
+  expect(m.resolveOwner).not.toHaveBeenCalled();
+  expect(m.publicRpc).not.toHaveBeenCalled();
+  expect(m.crmTools).not.toHaveBeenCalled();
+});
+
+it('a chave de leitura de agentes e as chaves comuns não enxergam nem chamam crm.feedback.*', async () => {
+  for (const token of [operator, ordinary]) {
+    const listed = await (await call('tools/list', {}, token)).json();
+    expect(listed.result.tools.some((t: { name: string }) => t.name.startsWith('crm.feedback.'))).toBe(false);
+    for (const name of feedbackTools) {
+      const refused = await call('tools/call', { name, arguments: { requestId: randomUUID(), status: 'descartado' } }, token);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ error: { code: -32602, message: `Unknown tool: ${name}` } });
+    }
+  }
+  expect(onlyAuthentication()).toBe(true);
+});
+
+it('nega o acesso quando não consegue ler o escopo da chave', async () => {
+  const update = () => call('tools/call', { name: 'crm.feedback.update', arguments: { requestId: randomUUID(), status: 'descartado' } });
+  // Escopo ausente, desconhecido ou no formato antigo (só o id) nunca vira chave da esteira.
+  for (const data of [[{ id: keyId, scope: null }], [{ id: keyId, scope: 'admin' }], [{ id: keyId }], keyId, [{ scope: 'feedback' }], null]) {
+    m.adminRpc.mockResolvedValueOnce({ data, error: null });
+    const denied = await update();
+    expect(denied.status).toBe(401);
+    expect(await denied.json()).toMatchObject({ error: { data: { code: 'AUTH_INVALID' } } });
+  }
+  m.adminRpc.mockResolvedValueOnce({ data: null, error: { message: 'function does not exist' } });
+  expect((await update()).status).toBe(503);
+  expect(onlyAuthentication()).toBe(true);
 });
 
 it('keeps ordinary keys on the organization validator, with the server-resolved owner and organization', async () => {

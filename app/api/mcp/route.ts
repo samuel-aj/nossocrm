@@ -112,7 +112,7 @@ export async function POST(request: Request) {
 
   const admin = createStaticAdminClient();
   if (auth.kind === 'operator') {
-    return handleRpc(body, () => operatorRegistry(admin, auth.apiKeyId), true);
+    return handleRpc(body, () => operatorRegistry(admin, auth.apiKeyId, auth.scope), true);
   }
   const user = await resolveMcpOwner(admin, auth.apiKeyId, auth.organizationId);
   if (!user) {

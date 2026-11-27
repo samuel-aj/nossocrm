@@ -3,8 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, KeyRound } from 'lucide-react';
 
+type KeyScope = 'ai_agents_read' | 'feedback';
 type KeyInfo = {
-  id: string; name: string; key_prefix: string; last_used_at: string | null; revoked_at: string | null;
+  id: string; name: string; key_prefix: string; scope?: KeyScope; last_used_at: string | null; revoked_at: string | null;
 };
 const endpoint = '/api/superadmin/operator-keys';
 const actionClass = 'rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium disabled:opacity-50 dark:border-white/20';
@@ -19,6 +20,7 @@ async function requestKeys<T>(init: RequestInit): Promise<T> {
 function OperatorKeysForm() {
   const [keys, setKeys] = useState<KeyInfo[]>([]);
   const [name, setName] = useState('');
+  const [scope, setScope] = useState<KeyScope>('ai_agents_read');
   const [secret, setSecret] = useState('');
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -39,7 +41,7 @@ function OperatorKeysForm() {
     setBusy(true); setError('');
     try {
       const result = await requestKeys<{ data: KeyInfo; token: string }>({
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), scope }),
       });
       setKeys(previous => [result.data, ...previous]);
       setSecret(result.token); setCopied(false); setName('');
@@ -61,7 +63,7 @@ function OperatorKeysForm() {
   }
 
   return <div className="mt-4 space-y-4">
-    <p className="text-sm text-slate-600 dark:text-slate-300">Use uma chave no conector do Paperclip para consultar os agentes dos escritórios. O conteúdo só fica disponível para agentes com “Monitorar com o squad” ligado.</p>
+    <p className="text-sm text-slate-600 dark:text-slate-300">Use uma chave no conector do Paperclip para consultar os agentes dos escritórios. O conteúdo só fica disponível para agentes com “Monitorar com o squad” ligado. A chave da esteira de ajustes só lê os pedidos e atualiza o status deles.</p>
     {secret ? <div className="space-y-2 rounded-lg border p-3">
       <label htmlFor="operator-token" className="block text-sm font-semibold">Copie a chave agora. Ela só aparece uma vez.</label>
       <input id="operator-token" className="w-full rounded border p-2 font-mono text-sm dark:bg-dark-card" readOnly value={secret} onFocus={e => e.target.select()} />
@@ -74,12 +76,16 @@ function OperatorKeysForm() {
       <label className="text-sm">Nome da chave
         <input required maxLength={120} className="mt-1 block rounded border px-3 py-2 dark:bg-dark-card" value={name} onChange={e => setName(e.target.value)} />
       </label>
-      <button className={actionClass} disabled={busy || !name.trim()}>Criar chave de leitura</button>
+      <select aria-label="Tipo de chave" className="rounded border px-3 py-2 text-sm dark:bg-dark-card" value={scope} onChange={e => setScope(e.target.value as KeyScope)}>
+        <option value="ai_agents_read">Leitura de agentes (Monitor)</option>
+        <option value="feedback">Esteira de ajustes</option>
+      </select>
+      <button className={actionClass} disabled={busy || !name.trim()}>{scope === 'feedback' ? 'Criar chave da esteira' : 'Criar chave de leitura'}</button>
     </form>}
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     {!busy && !keys.length && !error && <p className="text-sm text-slate-500">Nenhuma chave criada.</p>}
     <ul className="divide-y divide-slate-200 dark:divide-white/10">{keys.map(key => <li key={key.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-      <div><strong>{key.name}</strong> <code className="text-xs">{key.key_prefix}…</code>
+      <div><strong>{key.name}</strong> <span className="text-xs text-slate-500">{key.scope === 'feedback' ? 'Esteira' : 'Monitor'}</span> <code className="text-xs">{key.key_prefix}…</code>
         <p className="text-xs text-slate-500">Último uso: {key.last_used_at ? new Date(key.last_used_at).toLocaleString('pt-BR') : 'nunca usada'}</p>
       </div>
       {key.revoked_at ? <span className="text-sm">Revogada</span> : confirmId === key.id ? <div>

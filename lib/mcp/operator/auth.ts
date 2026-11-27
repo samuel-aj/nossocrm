@@ -8,8 +8,9 @@ import {
 } from '@/lib/security/rateLimit';
 import type { PublicApiAuthResult } from '@/lib/public-api/auth';
 
+export type OperatorScope = 'ai_agents_read' | 'feedback';
 type OperatorAuth = Extract<PublicApiAuthResult, { ok: false }>
-  | { ok: true; kind: 'operator'; apiKeyId: string };
+  | { ok: true; kind: 'operator'; apiKeyId: string; scope: OperatorScope };
 
 function limited(result: RateLimitResult): OperatorAuth {
   return { ok: false, status: 429, headers: rateLimitHeaders(result), body: {
@@ -28,12 +29,15 @@ export async function authenticateOperator(request: Request, token: string): Pro
   }
 
   let keyId: string | null = null;
+  let scope: OperatorScope = 'ai_agents_read';
   if (/^ncrmop_[A-Za-z0-9_-]{32,64}$/.test(token)) {
     const hash = createHash('sha256').update(token).digest('hex');
     try {
-      const { data, error } = await createStaticAdminClient().rpc('aj_operator_authenticate', { p_key_hash: hash });
+      const { data, error } = await createStaticAdminClient().rpc('aj_operator_authenticate_scoped', { p_key_hash: hash });
       if (error) throw error;
-      if (typeof data === 'string') keyId = data;
+      // Sem um escopo conhecido, a chave é recusada: nunca vira chave da esteira por padrão.
+      const row = Array.isArray(data) ? data[0] : null;
+      if (row && typeof row.id === 'string' && (row.scope === 'ai_agents_read' || row.scope === 'feedback')) { keyId = row.id; scope = row.scope; }
     } catch {
       return { ok: false, status: 503, body: { code: 'AUTH_UNAVAILABLE', error: 'Authentication unavailable' } };
     }
@@ -53,5 +57,5 @@ export async function authenticateOperator(request: Request, token: string): Pro
     await logRateLimitExceeded({ scope: 'operator_mcp', id: keyId, limit, request }, usage);
     return limited(usage);
   }
-  return { ok: true, kind: 'operator', apiKeyId: keyId };
+  return { ok: true, kind: 'operator', apiKeyId: keyId, scope };
 }

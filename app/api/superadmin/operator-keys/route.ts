@@ -8,8 +8,8 @@ import { UserRole } from '@/types/constants';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const columns = 'id,name,key_prefix,created_at,last_used_at,revoked_at';
-const createInput = z.strictObject({ name: z.string().trim().min(1).max(120) });
+const columns = 'id,name,key_prefix,scope,created_at,last_used_at,revoked_at';
+const createInput = z.strictObject({ name: z.string().trim().min(1).max(120), scope: z.enum(['ai_agents_read', 'feedback']).default('ai_agents_read') });
 const revokeInput = z.strictObject({ id: z.uuid() });
 const json = (body: unknown, status = 200) => Response.json(body, {
   status, headers: { 'Cache-Control': 'private, no-store' },
@@ -42,10 +42,10 @@ export async function POST(req: Request) {
   const { token, prefix, hash } = makeApiKeyToken('ncrmop_');
   const admin = createStaticAdminClient();
   const { data, error } = await admin.from('aj_operator_keys')
-    .insert({ name: parsed.data.name, key_prefix: prefix, key_hash: hash, created_by: actor.id })
+    .insert({ name: parsed.data.name, scope: parsed.data.scope, key_prefix: prefix, key_hash: hash, created_by: actor.id })
     .select(columns).single();
   if (error || !data) return json({ error: 'Não foi possível criar a chave.' }, 500);
-  await logSecurityEvent({ action: 'api_key.created', actorId: actor.id, resourceType: 'aj_operator_key', resourceId: data.id, severity: 'warning' }, req, admin);
+  await logSecurityEvent({ action: 'api_key.created', actorId: actor.id, resourceType: 'aj_operator_key', resourceId: data.id, severity: 'warning', details: { scope: parsed.data.scope } }, req, admin);
   return json({ data, token }, 201);
 }
 

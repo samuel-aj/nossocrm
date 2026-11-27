@@ -50,13 +50,26 @@ it('devolve o segredo apenas na criação e armazena somente hash e prefixo', as
   expect(response.headers.get('cache-control')).toContain('no-store');
   const { token } = await response.json();
   expect(token).toMatch(/^ncrmop_[A-Za-z0-9_-]{32}$/);
-  expect(db.insert).toHaveBeenCalledWith({ name: record.name, created_by: 'actor',
+  expect(db.insert).toHaveBeenCalledWith({ name: record.name, created_by: 'actor', scope: 'ai_agents_read',
     key_hash: createHash('sha256').update(token).digest('hex'), key_prefix: token.slice(0, 12) });
   expect(JSON.stringify(vi.mocked(logSecurityEvent).mock.calls[0][0])).not.toContain(token);
   const list = await GET(req('GET'));
   expect(await list.json()).toEqual({ data: [record] });
   for (const [fields] of db.select.mock.calls) expect(fields.split(',')).not.toEqual(expect.arrayContaining(['key_hash']));
   expect(db.from.mock.calls.every(([table]) => table === 'aj_operator_keys')).toBe(true);
+});
+it('grava o escopo escolhido, usa a leitura de agentes como padrão e recusa escopo desconhecido', async () => {
+  expect((await POST(req('POST', { name: 'Esteira de teste', scope: 'feedback' }))).status).toBe(201);
+  expect(db.insert).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Esteira de teste', scope: 'feedback' }));
+  expect(logSecurityEvent).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'api_key.created', details: { scope: 'feedback' } }), expect.anything(), expect.anything());
+  expect((await POST(req('POST', { name: 'Monitor de teste' }))).status).toBe(201);
+  expect(db.insert).toHaveBeenLastCalledWith(expect.objectContaining({ scope: 'ai_agents_read' }));
+  expect(db.select).toHaveBeenCalledWith(expect.stringContaining('scope'));
+  db.from.mockClear();
+  for (const scope of ['admin', 'ai_agents_write', null]) {
+    expect((await POST(req('POST', { name: 'Teste', scope }))).status).toBe(422);
+  }
+  expect(db.from).not.toHaveBeenCalled();
 });
 it('revoga apenas a chave ativa solicitada e identifica o administrador', async () => {
   expect((await DELETE(req('DELETE', { id: keyId }))).status).toBe(200);
