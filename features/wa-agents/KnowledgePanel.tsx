@@ -291,6 +291,7 @@ type DocumentMetaDraft = { title: string; description: string; tags: string };
 function DocumentRow({
   doc,
   busy,
+  learned,
   onOpen,
   onReprocess,
   onDelete,
@@ -298,6 +299,8 @@ function DocumentRow({
 }: {
   doc: AgentDocumentRow;
   busy: boolean;
+  /** Respostas aprendidas incluídas neste documento */
+  learned: number;
   onOpen: () => void;
   onReprocess: () => void;
   onDelete: () => void;
@@ -387,6 +390,7 @@ function DocumentRow({
           <Badge tone="slate">{DOC_EXT_LABEL[doc.mime ?? ''] ?? doc.mime ?? 'arquivo'}</Badge>
           <span>{formatBytes(doc.size_bytes)}</span>
           {doc.status === 'ready' ? <span>{chunks === 1 ? '1 trecho' : `${chunks} trechos`}</span> : null}
+          {learned > 0 ? <span>{learned === 1 ? '1 resposta aprendida' : `${learned} respostas aprendidas`}</span> : null}
           <span>{formatDateTime(doc.created_at)}</span>
         </p>
         {doc.status === 'error' && doc.error ? (
@@ -608,8 +612,10 @@ export const KnowledgePanel: React.FC<{
   /** Salva o agente (para liberar os uploads de um agente novo) */
   onRequestSave: () => void;
   saving: boolean;
+  /** Respostas aprendidas por documento (lista e confirmação de exclusão) */
+  learnedByDocument?: Record<string, number>;
   children?: React.ReactNode;
-}> = ({ agentId, onInsertMedia, onRenameMedia, onRequestSave, saving, children }) => {
+}> = ({ agentId, onInsertMedia, onRenameMedia, onRequestSave, saving, learnedByDocument, children }) => {
   const { showToast } = useToast();
   const docsQ = useWaAgentDocuments(agentId);
   const mediaQ = useWaAgentMedia(agentId);
@@ -763,6 +769,7 @@ export const KnowledgePanel: React.FC<{
                 key={doc.id}
                 doc={doc}
                 busy={busyId === doc.id}
+                learned={learnedByDocument?.[doc.id] ?? 0}
                 onOpen={() => {
                   // A aba abre ANTES do await (aberta depois, o navegador barra como pop-up)
                   // e só então recebe a URL assinada.
@@ -855,7 +862,11 @@ export const KnowledgePanel: React.FC<{
         title={confirm?.kind === 'doc' ? 'Excluir documento?' : 'Excluir mídia?'}
         message={
           confirm?.kind === 'doc'
-            ? `"${confirm?.name}" e os trechos indexados serão apagados. O agente deixa de consultar este documento.`
+            ? `"${confirm?.name}" e os trechos indexados serão apagados. O agente deixa de consultar este documento.${
+                (learnedByDocument?.[confirm?.id ?? ''] ?? 0) > 0
+                  ? ` As ${learnedByDocument?.[confirm?.id ?? '']} respostas aprendidas dele voltam para Dúvidas sem resposta.`
+                  : ''
+              }`
             : `"${confirm?.name}" será apagada. Marcadores [[midia:${confirm?.name}]] no roteiro deixam de funcionar.`
         }
         confirmText="Excluir"

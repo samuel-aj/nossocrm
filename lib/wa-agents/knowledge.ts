@@ -18,6 +18,7 @@ import { AiUsageError, assertUsageHealthy, failUsage, requireUsageContext, runWi
 import { meterEmbeddingModel } from '@/lib/ai-usage/meteredModel';
 import { errorMessage } from './errors';
 import { getOrganizationApiKey } from './model';
+import { LEARNED_CHUNK_IDX_BASE, loadLearnedAnswers } from './learnedAnswers';
 import { getAgentFileInfo } from './storage';
 import {
   AGENT_CHUNKS_MAX_PER_AGENT,
@@ -426,7 +427,7 @@ export async function loadReadyDocuments(
 }
 
 /** Modelo de embedding já usado nos documentos prontos do agente (o mais comum) e total de trechos. */
-async function agentEmbeddingProfile(
+export async function agentEmbeddingProfile(
   admin: SupabaseClient,
   organizationId: string,
   agentId: string,
@@ -549,18 +550,23 @@ async function processDocumentWithUsage(
     const chunks = chunkText(text);
     if (chunks.length === 0) throw new Error('O documento não tem texto aproveitável');
 
+    // Respostas aprendidas incluídas neste documento continuam como trechos extras
+    const learned = await loadLearnedAnswers(admin, doc.organization_id, doc.id);
+    const total = chunks.length + learned.length;
+
     // Teto de trechos por agente (somando os outros documentos prontos)
     const profile = await agentEmbeddingProfile(admin, doc.organization_id, doc.agent_id, { exceptDocumentId: doc.id });
-    if (profile.chunks + chunks.length > AGENT_CHUNKS_MAX_PER_AGENT) {
+    if (profile.chunks + total > AGENT_CHUNKS_MAX_PER_AGENT) {
       throw new Error(
-        `Limite de ${AGENT_CHUNKS_MAX_PER_AGENT} trechos por agente ultrapassado (este documento tem ${chunks.length}; os demais somam ${profile.chunks}). Remova documentos ou envie um arquivo menor.`
+        `Limite de ${AGENT_CHUNKS_MAX_PER_AGENT} trechos por agente ultrapassado (este documento tem ${total}; os demais somam ${profile.chunks}). Remova documentos ou envie um arquivo menor.`
       );
     }
 
     remaining('embeddings');
     // Vetoriza cabeçalho + trecho (o conteúdo gravado continua só o trecho)
     const header = documentHeader(doc);
-    const toEmbed = chunks.map(c => `${header}\n${c}`);
+    const contents = [...chunks, ...learned.map(item => item.content)];
+    const toEmbed = contents.map(c => `${header}\n${c}`);
     let embedded: EmbedTextsResult | null = null;
     try {
       embedded = await embedTexts(admin, doc.organization_id, toEmbed, { prefer: profile.model, abortSignal: abort });
@@ -573,27 +579,29 @@ async function processDocumentWithUsage(
 
     remaining('gravação');
     await deleteDocumentChunks(admin, doc.organization_id, doc.id);
-    for (let i = 0; i < chunks.length; i += CHUNK_INSERT_BATCH) {
-      const rows = chunks.slice(i, i + CHUNK_INSERT_BATCH).map((content, j) => ({
-        organization_id: doc.organization_id,
-        agent_id: doc.agent_id,
-        document_id: doc.id,
-        idx: i + j,
-        content,
-        embedding: embedded ? embedded.embeddings[i + j] : null,
-        embedding_model: embedded ? embedded.model : null,
-      }));
-      const { error } = await admin.from('wa_ai_agent_chunks').insert(rows);
+    const rows = contents.map((content, k) => ({
+      organization_id: doc.organization_id,
+      agent_id: doc.agent_id,
+      document_id: doc.id,
+      idx: k < chunks.length ? k : LEARNED_CHUNK_IDX_BASE + (k - chunks.length),
+      content,
+      embedding: embedded ? embedded.embeddings[k] : null,
+      embedding_model: embedded ? embedded.model : null,
+      // gap_id só nas respostas aprendidas (antes da migração a coluna não existe)
+      ...(k >= chunks.length ? { gap_id: learned[k - chunks.length].gapId } : {}),
+    }));
+    for (let i = 0; i < rows.length; i += CHUNK_INSERT_BATCH) {
+      const { error } = await admin.from('wa_ai_agent_chunks').insert(rows.slice(i, i + CHUNK_INSERT_BATCH));
       if (error) throw new Error(`Falha ao gravar os trechos: ${error.message}`);
     }
 
     await setDocumentStatus(admin, doc, {
       status: 'ready',
       error: null,
-      chunk_count: chunks.length,
+      chunk_count: total,
       embedding_model: embedded ? embedded.model : null,
     });
-    return { ok: true, chunkCount: chunks.length, embedded: !!embedded };
+    return { ok: true, chunkCount: total, embedded: !!embedded };
   } catch (e) {
     const msg = errorMessage(e).slice(0, 1000);
     console.error('[wa-agents] processar documento falhou:', msg);

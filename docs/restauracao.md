@@ -76,6 +76,7 @@ A restauração não traz de volta arquivos apagados do Storage (seção 5).
 
 | Etiqueta | O que entrou depois dela | SQL de desfazer |
 |---|---|---|
+| `prod-pre-aprendizado-agente` | Dúvidas sem resposta e revisão de respostas pelos administradores | [Desfazer o aprendizado](aprendizado-agente-rollback.sql) depois do código, para as duas migrações de aprendizado. Havendo dúvidas gravadas, preserva o histórico e os trechos. Durante a reversão, evite reprocessar, alterar os metadados ou excluir documentos com respostas incluídas. |
 | `prod-pre-mcp-agentes-ia` | Monitoramento de agentes e histórico do roteiro via MCP | `docs/mcp-ai-agents-rollback.sql` depois do código. Revoga as chaves do squad e remove os históricos. |
 | `prod-pre-dados-encerramento-20261126` | Dados obrigatórios para a preparação do contrato | `docs/dados-encerramento-rollback.sql`, antes do código |
 | `prod-pre-zapsign` | Integração ZapSign | `docs/zapsign-rollback.sql` |

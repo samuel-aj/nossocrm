@@ -11,7 +11,7 @@ import { useToast } from '@/context/ToastContext';
 import { DEFAULT_AGENT_TRIGGERS, SCRIPT_ACTION_MARKER_RE, type AgentInput, type AgentPublic } from '@/lib/wa-agents/types';
 import { normalizeKeyword } from '@/lib/wa-agents/text';
 import { PROVIDER_LABELS } from '@/lib/wa-agents/catalog';
-import { useDeleteWaAgent, useSaveWaAgent, useWaAgentOptions, useWaAgentsList, type WaAgentListItem } from './useWaAgents';
+import { useDeleteWaAgent, useSaveWaAgent, useWaAgentOptions, useWaAgentsList, useWaKnowledgeGapSummary, type WaAgentListItem } from './useWaAgents';
 import { AgentEditor } from './AgentEditor';
 import { BTN_ICON, BTN_PRIMARY, Badge, CopyIdButton, EmptyState, Notice, Spinner, Toggle, errorMessage } from './ui';
 
@@ -78,6 +78,8 @@ export const AgentList: React.FC = () => {
   const save = useSaveWaAgent();
   const del = useDeleteWaAgent();
   const { showToast } = useToast();
+  // A lista completa (com provedor e modelo) só chega para administradores
+  const gapSummary = useWaKnowledgeGapSummary((listQ.data ?? []).some((item) => asPublic(item) !== null));
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WaAgentListItem | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -181,6 +183,11 @@ export const AgentList: React.FC = () => {
                       {item.persona_name ? <Badge tone="purple">Persona: {item.persona_name}</Badge> : null}
                       <Badge tone={item.enabled ? 'green' : 'slate'}>{item.enabled ? 'Ligado' : 'Desligado'}</Badge>
                       {full?.has_api_key ? <Badge tone="blue">Chave própria</Badge> : null}
+                      {(gapSummary.data?.[item.id] ?? 0) > 0 ? (
+                        <Badge tone="amber">
+                          {gapSummary.data![item.id] === 1 ? '1 dúvida' : `${gapSummary.data![item.id]} dúvidas`}
+                        </Badge>
+                      ) : null}
                       <CopyIdButton id={item.id} label="ID do agente" />
                     </div>
                     <div className="mt-2 flex flex-col gap-1 text-xs text-slate-500 dark:text-slate-400">

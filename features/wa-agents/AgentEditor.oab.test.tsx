@@ -55,6 +55,7 @@ it.each([
   const tab = openKnowledge(editing);
   expect(tab.getByRole('heading', { name: 'Base de conhecimento' })).toBeVisible();
   expect(tab.getByRole('heading', { name: 'Inscrições da OAB' })).toBeVisible();
+  if (editing) expect(tab.getByRole('heading', { name: 'Dúvidas sem resposta' })).toBeVisible();
   expect(await tab.findByText('Ana Exemplo · OAB/MS 12345')).toBeVisible();
   expect(oabRequests).toEqual([agent.organization_id]);
 });

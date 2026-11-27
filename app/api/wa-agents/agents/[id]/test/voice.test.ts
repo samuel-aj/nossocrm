@@ -98,6 +98,7 @@ describe('escolha da voz de um agente', () => {
   ])('salva somente as opções alteradas em mídias (%j)', async (incoming, expected) => {
     const query = {
       select: () => query, eq: () => query,
+      setHeader: vi.fn().mockReturnThis(),
       update: vi.fn(() => query), maybeSingle: async () => ({ data: saved }),
     };
     mocks.from.mockReturnValue(query);
@@ -105,6 +106,7 @@ describe('escolha da voz de um agente', () => {
       method: 'PATCH', body: JSON.stringify({ media_understanding: incoming }),
     }), { params: Promise.resolve({ id }) });
     expect(response.status).toBe(200);
+    expect(query.setHeader).toHaveBeenCalledWith('x-crm-prompt-editor', 'user');
     expect(query.update).toHaveBeenCalledWith(expect.objectContaining({ media_understanding: expect.objectContaining(expected) }));
   });
 });

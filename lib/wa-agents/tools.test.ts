@@ -216,3 +216,37 @@ describe('utilitários de nomes', () => {
     expect(helperDisplayName({ name: 'Trabalhista', persona_name: null })).toBe('Trabalhista');
   });
 });
+
+describe('registrar_duvida_sem_resposta', () => {
+  const on = () => agent({ tools: { calculator: true, knowledge_gaps: true } });
+
+  it('só aparece com a opção ligada e o executor, nunca nas ferramentas dos auxiliares', () => {
+    const reportGap = async () => ({ ok: true });
+    expect(buildAgentTools(on(), { reportGap })).toHaveProperty('registrar_duvida_sem_resposta');
+    expect(buildAgentTools(on())).not.toHaveProperty('registrar_duvida_sem_resposta');
+    expect(buildAgentTools(agent(), { reportGap })).not.toHaveProperty('registrar_duvida_sem_resposta');
+    expect(buildUtilityTools(on(), { reportGap })).not.toHaveProperty('registrar_duvida_sem_resposta');
+  });
+
+  it('repassa a entrada ao executor e transforma erro em resposta sem lançar', async () => {
+    const calls: unknown[] = [];
+    const tools = buildAgentTools(on(), {
+      reportGap: async input => {
+        calls.push(input);
+        return { ok: true, registrada: true };
+      },
+    });
+    const exec = tools.registrar_duvida_sem_resposta!.execute as (input: unknown, opts: unknown) => Promise<unknown>;
+    const input = { pergunta: 'Qual é o hotel do pacote?', o_que_falta: 'A base não cita o nome.' };
+    expect(await exec(input, {})).toEqual({ ok: true, registrada: true });
+    expect(calls).toEqual([input]);
+
+    const failing = buildAgentTools(on(), {
+      reportGap: async () => {
+        throw new Error('banco fora do ar');
+      },
+    });
+    const execFail = failing.registrar_duvida_sem_resposta!.execute as (input: unknown, opts: unknown) => Promise<unknown>;
+    expect(await execFail({ pergunta: 'Qual o hotel?' }, {})).toEqual({ ok: false, erro: 'banco fora do ar' });
+  });
+});
