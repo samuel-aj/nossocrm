@@ -38,7 +38,7 @@ import {
   Sun,
   Moon,
   BarChart3,
-  Lightbulb,
+  Wrench,
   GraduationCap,
   Inbox,
   Sparkles,
@@ -73,6 +73,7 @@ import { BottomNav, MoreMenuSheet, NavigationRail } from '@/components/navigatio
 import { UIChat } from './ai/UIChat';
 
 import { NotificationPopover } from './notifications/NotificationPopover';
+import { ReportButton } from '@/features/feedback/components/ReportButton';
 import { OrgSwitcher } from './OrgSwitcher';
 
 /**
@@ -678,7 +679,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           {/* GRUPO Ajuda (recolhível): Sugestões + Tutorial */}
           {(() => {
             const helpChildren = [
-              { to: '/suggestions', icon: Lightbulb, label: 'Sugestões', prefetch: 'suggestions' as RouteName },
+              { to: '/suggestions', icon: Wrench, label: 'Ajustes', prefetch: 'suggestions' as RouteName },
               { to: '/tutorial', icon: GraduationCap, label: 'Tutorial', prefetch: 'tutorial' as RouteName },
             ];
             return (
@@ -915,6 +916,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <Bug size={20} aria-hidden="true" />
               </button>
 
+              <ReportButton />
               <NotificationPopover />
               <button
                 type="button"

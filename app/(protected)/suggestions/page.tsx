@@ -3,11 +3,11 @@
 import dynamic from 'next/dynamic'
 import { PageLoader } from '@/components/PageLoader'
 
-const SuggestionsPage = dynamic(
-    () => import('@/features/suggestions/SuggestionsPage').then(m => ({ default: m.SuggestionsPage })),
+const FeedbackPage = dynamic(
+    () => import('@/features/feedback/FeedbackPage').then(m => ({ default: m.FeedbackPage })),
     { loading: () => <PageLoader />, ssr: false }
 )
 
 export default function Suggestions() {
-    return <SuggestionsPage />
+    return <FeedbackPage />
 }

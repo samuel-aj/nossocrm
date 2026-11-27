@@ -7,7 +7,7 @@ import {
   MoreHorizontal,
   LayoutDashboard,
   BarChart3,
-  Lightbulb,
+  Wrench,
   Settings,
   User,
   GraduationCap,
@@ -70,7 +70,7 @@ export const SECONDARY_NAV: SecondaryNavItem[] = [
   { id: 'conexao', label: 'Conexão WhatsApp', href: '/conexao-whatsapp', icon: QrCode, adminOnly: true },
   { id: 'reports', label: 'Relatórios', href: '/reports', icon: BarChart3 },
   { id: 'settings', label: 'Configurações', href: '/settings', icon: Settings },
-  { id: 'suggestions', label: 'Sugestões', href: '/suggestions', icon: Lightbulb },
+  { id: 'suggestions', label: 'Ajustes', href: '/suggestions', icon: Wrench },
   { id: 'tutorial', label: 'Tutorial', href: '/tutorial', icon: GraduationCap },
   // Fim do menu, nesta ordem: Perfil, Super Admin (roxo) e o Sair (renderizado
   // pelos componentes logo depois da lista)
