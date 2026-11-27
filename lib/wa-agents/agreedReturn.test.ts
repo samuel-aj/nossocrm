@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai';
 import { describe, expect, it, vi } from 'vitest';
-import { bookExplicitReturn, guardReturnPromises, RETURN_UNCONFIRMED } from './agreedReturn';
+import { bookExplicitReturn, guardReturnPromises, returnServiceForModel, RETURN_UNCONFIRMED } from './agreedReturn';
 import type { ReplySegment } from './replyOutput';
 import { resolveReturnTime } from './scheduledReturnTime';
 import type { ReturnTimeInput } from './scheduledReturnTime';
@@ -20,6 +20,52 @@ function fakeReturn() {
 const booked = (scheduledAt: string, timezone: string) => [{ tool: 'agendar_retorno', input: {}, output: { ok: true, id: 'return-id', scheduledAt, timezone } }];
 
 describe('retorno combinado com o cliente', () => {
+  const pending = { id: 'reserva', scheduled_for: '2026-11-23T23:00:00.000Z', scheduled_timezone: 'America/Manaus' };
+  const input = { local: '2026-11-23T19:00', timezone: 'America/Manaus', context: 'Horário confirmado pela IA', confirmed: true as const };
+  const runtime = (open = true) => ({ ...fakeReturn(), inspect: vi.fn(async () => ({ now, timezone: input.timezone, pending: open ? pending : null })) });
+  it.each(['Blz', 'Ok', '👍🏻', 'Combinado', 'tá bom, obrigada', 'Quanto custa?', 'Tenho uma dúvida', 'Resolvi', 'Já resolvi o login', 'Se eu resolver, cancela o retorno?', 'Não cancele o retorno', 'Já resolvi, mas quero falar com você'])('preserva a reserva mesmo se o modelo pedir alteração após “%s”', async words => {
+    const service = runtime();
+    const guarded = returnServiceForModel(service, [assistant('Combinado! Te chamo amanhã (23/11) às 19h.'), user(words)]);
+    expect(await guarded.cancel()).toMatchObject({ ok: false });
+    expect(await guarded.schedule(input)).toMatchObject({ ok: false, preserved: true, pending });
+    expect(service.cancel).not.toHaveBeenCalled();
+    expect(service.schedule).not.toHaveBeenCalled();
+  });
+  it.each(['Não precisa mais me chamar.', 'Não me chame mais', 'Já resolvi, não precisa me chamar', 'Cancela o retorno', 'Já resolvi meu problema', 'Já resolvi tudo, obrigado'])('só permite cancelar quando o pedido ou a resolução são claros (%s)', async words => {
+    const service = runtime(false);
+    service.cancel.mockResolvedValue({ ok: true, cancelled: 0 });
+    const guarded = returnServiceForModel(service, [user(words)]);
+    expect(await guarded.cancel()).toMatchObject({ ok: true });
+    expect(await guarded.schedule(input)).toMatchObject({ ok: false });
+    expect(service.cancel).toHaveBeenCalledOnce();
+    expect(service.schedule).not.toHaveBeenCalled();
+  });
+  it.each(['Blz', '👍', 'Tá bom, obrigada', 'Recebido', 'Talvez mais tarde'])('não cria um novo retorno quando já não há reserva e o cliente diz “%s”', async words => {
+    const service = runtime(false);
+    expect(await returnServiceForModel(service, [user(words)]).schedule(input)).toMatchObject({ ok: false });
+    expect(service.schedule).not.toHaveBeenCalled();
+  });
+  it.each([
+    [[user('Troque o horário para as 20h')], '2026-11-23T20:00'],
+    [[user('Remarca o retorno para 30/11 às 15h')], '2026-11-30T15:00'],
+    [[assistant('Posso te chamar terça-feira às 16h?'), user('Pode sim')], '2026-11-24T16:00'],
+    [[assistant('Podemos remarcar o retorno para amanhã às 20h?'), user('Sim')], '2026-11-23T20:00'],
+  ] as const)('remarca somente o horário confirmado, usando a data da reserva se só a hora mudou', async (messages, local) => {
+    const service = runtime();
+    const guarded = returnServiceForModel(service, [...messages]);
+    expect(await guarded.schedule(input)).toMatchObject({ ok: false, preserved: true });
+    expect(await guarded.schedule({ ...input, local })).toMatchObject({ ok: true });
+    expect(service.schedule).toHaveBeenCalledOnce();
+    const booking = await bookExplicitReturn([...messages], service);
+    expect(booking?.calls.at(-1)).toMatchObject({ tool: 'agendar_retorno', input: { local } });
+  });
+  it('preserva a reserva até a confirmação quando o cliente pergunta por uma mudança', async () => {
+    const service = runtime();
+    const messages = [user('Dá para mudar para amanhã às 20h?')];
+    expect(await bookExplicitReturn(messages, service)).toBeNull();
+    expect(await returnServiceForModel(service, messages).schedule({ ...input, local: '2026-11-23T20:00' })).toMatchObject({ ok: false, preserved: true });
+    expect(service.schedule).not.toHaveBeenCalled();
+  });
   it.each([
     [[user('Pode me chamar às 20h?')], '2026-11-22T20:00', 'Combinado! Te chamo hoje (22/11) às 20h.'],
     [[user('Me chama daqui a 13 horas')], '2026-11-23T03:00', 'Combinado! Te chamo amanhã (23/11) às 3h.'],

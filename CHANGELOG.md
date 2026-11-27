@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Confirmações curtas preservam o retorno combinado
+- **Tipo:** Correção
+- **O que mudou:** o robô mantém o horário combinado quando o cliente responde “blz”, agradece, envia um emoji ou deixa dúvida sobre o que deseja. Uma remarcação confirmada substitui a reserva anterior. Um pedido claro de cancelamento encerra o retorno.
+- **Por quê:** uma confirmação de recebimento cancelava o agendamento e o cliente ficava esperando.
+- **Quem:** solicitado por Gézer e Samuel, implementado pelo Codex.
+- **Banco:** `20261127190000_keep_agreed_robot_return.sql`. Reversão em `docs/retorno-combinado-confirmacao-rollback.sql`.
+- **Para voltar:** use o ponto de restauração `prod-pre-retorno-combinado-confirmacao` previsto para a publicação e siga a ordem indicada no SQL de reversão.
+
 ### 27/11/2026 · Menos consultas automáticas do sino
 - **Tipo:** Correção
 - **O que mudou:** o sino consulta novos avisos a cada minuto e atualiza ao abrir ou voltar para o CRM, com proteção contra consultas seguidas. As preferências deixam de ser consultadas continuamente. Sem internet as consultas param, e falhas repetidas aumentam o intervalo entre tentativas. Ao voltar, o sino recupera até 24 horas desde a última consulta concluída, sem repetir sons de avisos antigos.

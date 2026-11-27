@@ -21,7 +21,7 @@ import type { WaMessageLite } from './context';
 import type { AgentRow } from './types';
 
 /** Linha de mensagem com o que precisamos para baixar e descrever a mídia. */
-export type MediaMessageRow = WaMessageLite & { media_url?: string | null; media_mime?: string | null };
+export type MediaMessageRow = WaMessageLite & { media_url?: string | null; media_mime?: string | null; forwarded?: boolean };
 
 /** Colunas a mais que o motor precisa selecionar para esta etapa. */
 export const MEDIA_MESSAGE_COLUMNS = 'media_url, media_mime';

@@ -252,7 +252,7 @@ async function getPendingInbound(
 ): Promise<MediaMessageRow[]> {
   const { data, error } = await admin
     .from('wa_messages')
-    .select(`${MESSAGE_LITE_COLUMNS}, ${MEDIA_MESSAGE_COLUMNS}`)
+    .select(`${MESSAGE_LITE_COLUMNS}, ${MEDIA_MESSAGE_COLUMNS}, forwarded`)
     .eq('organization_id', ctx.conversation.organization_id)
     .eq('conversation_id', ctx.conversation.id)
     .eq('direction', 'in').is('deleted_at', null)
@@ -999,7 +999,9 @@ async function runAgentWithUsage(input: RunAgentInput, admin: SupabaseClient): P
       await checkInbound();
       await beginDispatch();
       gen = await generateAgentReply({ model: resolved.model, agent, system, messages, runtime, followupInstruction: input.followup?.instruction,
-        inboundReturn: !input.forceReply && !input.proactive && pending.length > 0 });
+        // An extracted document or forwarded message cannot speak for the customer.
+        inboundReturn: !input.forceReply && !input.proactive && pending.length > 0 &&
+          pending.every(m => !m.forwarded && (!m.media_type || m.media_type === 'audio')) });
       gen = await guardOutcomeData(gen, agent.outcomes, priorState.dados, messages, outcomeDataExtractor(resolved.model));
     }
     assertUsageHealthy();

@@ -10,7 +10,7 @@ import { planMediaMarkers } from './mediaMarkers';
 import { recoverNamedReplyMarkers } from './namedReplyMarkers';
 import { readAgentVoiceScripts } from './voiceScript';
 import { contractTurnWait, type ContractTurnWait } from './contractConfirmation';
-import { bookExplicitReturn, guardReturnPromises } from './agreedReturn';
+import { bookExplicitReturn, guardReturnPromises, returnServiceForModel } from './agreedReturn';
 
 export type CollectedToolCall = { tool: string; input: unknown; output?: unknown };
 type RecoveryFailureCode = 'invalid_slots' | 'internal_content' | 'parse_or_provider_failure';
@@ -93,7 +93,10 @@ export async function generateAgentReply(input: {
     // document, allow one text-only final answer grounded in the returned excerpts.
     return calls.some(callsKnowledge) ? 'answer' : 'stop';
   };
-  const agentTools = buildAgentTools(input.agent, { ...input.runtime, voiceClips });
+  const scheduledReturn = input.runtime?.scheduledReturn;
+  const agentTools = buildAgentTools(input.agent, { ...input.runtime, voiceClips,
+    ...(scheduledReturn && { scheduledReturn: returnServiceForModel(scheduledReturn, input.inboundReturn === false ? [] : input.messages) }),
+  });
   const result = await generateText({
     model: input.model,
     maxRetries: 0,

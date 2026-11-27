@@ -124,11 +124,28 @@ describe('contrato com o AI SDK instalado', () => {
       ]);
       const result = await generateAgentReply({ ...input, model,
         agent: { ...agent, tools: { ...agent.tools, scheduled_return_bot_id: 'robot' } },
-        runtime: { scheduledReturn: { schedule, inspect: vi.fn(), cancel: vi.fn() } } });
+        messages: [{ role: 'user', content: 'Me chama amanhã às 9h.' }],
+        runtime: { scheduledReturn: { schedule, inspect: vi.fn().mockResolvedValue({ pending: null }), cancel: vi.fn() } } });
       expect(schedule).toHaveBeenCalledExactlyOnceWith(booking);
       expect(result.text).toBe('Combinado, Fulano!\nTe chamo amanhã (25/11) às 9h.');
       expect(result.outputSafety).toMatchObject({ status: 'repaired', returnReplyAdjusted: true });
     } finally { vi.useRealTimers(); }
+  });
+  it('preserva o retorno da cliente mesmo quando o modelo tenta cancelar e remarcar após “Blz”', async () => {
+    const pending = { id: 'reserva', scheduled_for: '2026-11-27T23:00:00.000Z', scheduled_timezone: 'America/Manaus' };
+    const service = { inspect: vi.fn().mockResolvedValue({ pending, now: '2026-11-26T20:00:00Z', timezone: pending.scheduled_timezone }), cancel: vi.fn(), schedule: vi.fn() };
+    const model = queuedModel([response([
+      { type: 'tool-call', toolCallId: 'cancel', toolName: 'cancelar_retorno', input: '{}' },
+      { type: 'tool-call', toolCallId: 'book', toolName: 'agendar_retorno',
+        input: JSON.stringify({ local: '2026-11-27T20:00', timezone: pending.scheduled_timezone, confirmed: true, context: 'Reagendar após confirmação' }) },
+    ]), text('Até lá!')]);
+    const reply = await generateAgentReply({ ...input, model, inboundReturn: true,
+      messages: [{ role: 'assistant', content: 'Combinado! Te chamo amanhã (27/11) às 19h.' }, { role: 'user', content: 'Blz' }],
+      agent: { ...agent, tools: { ...agent.tools, scheduled_return_bot_id: 'robot' } }, runtime: { scheduledReturn: service } });
+    expect(reply.toolCalls).toMatchObject([{ tool: 'cancelar_retorno', output: { ok: false } }, { tool: 'agendar_retorno', output: { ok: false, preserved: true, pending } }]);
+    expect(service.schedule).not.toHaveBeenCalled();
+    expect(service.cancel).not.toHaveBeenCalled();
+    expect(reply.text).toBe('Até lá!');
   });
   const savedAnnotation = '[salvar_dados]\n' + JSON.stringify({
     documentos_rescisao: 'aguardando',
