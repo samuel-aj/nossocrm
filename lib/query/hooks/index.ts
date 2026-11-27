@@ -89,6 +89,16 @@ export {
   useDeleteSuggestion,
 } from './useSuggestionsQuery';
 
+// Caixa de ajustes
+export {
+  useMyFeedback,
+  useAllFeedback,
+  useFeedbackDetail,
+  useCreateFeedback,
+  useReplyFeedback,
+} from './useFeedbackQuery';
+export type { FeedbackRow, FeedbackDetail } from './useFeedbackQuery';
+
 // Org users (responsável / owner picker)
 export { useOrgUsers } from './useOrgUsers';
 export type { OrgUser } from './useOrgUsers';

@@ -8,8 +8,15 @@ import { UserRole } from '@/types/constants';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const columns = 'id,name,key_prefix,created_at,last_used_at,revoked_at';
-const createInput = z.strictObject({ name: z.string().trim().min(1).max(120) });
+const columns = 'id,name,key_prefix,scope,created_at,last_used_at,revoked_at';
+// Antes da migração 20261128120200 a tabela não tem a coluna scope: toda chave é de leitura de agentes.
+const legacyColumns = 'id,name,key_prefix,created_at,last_used_at,revoked_at';
+type DbError = { code?: string; message?: string } | null;
+type KeyResult = { data: ({ id: string } & Record<string, unknown>) | null; error: DbError };
+const missingScope = (error: DbError) => !!error
+  && (error.code === '42703' || error.code === 'PGRST204' || /scope/i.test(error.message ?? ''));
+const legacyScope = <T extends object>(row: T) => ({ ...row, scope: 'ai_agents_read' as const });
+const createInput = z.strictObject({ name: z.string().trim().min(1).max(120), scope: z.enum(['ai_agents_read', 'feedback']).default('ai_agents_read') });
 const revokeInput = z.strictObject({ id: z.uuid() });
 const json = (body: unknown, status = 200) => Response.json(body, {
   status, headers: { 'Cache-Control': 'private, no-store' },
@@ -29,9 +36,12 @@ async function authorize(req: Request) {
 export async function GET(req: Request) {
   const actor = await authorize(req);
   if (actor instanceof Response) return actor;
-  const { data, error } = await createStaticAdminClient().from('aj_operator_keys')
-    .select(columns).order('created_at', { ascending: false });
-  return error ? json({ error: 'Não foi possível consultar as chaves.' }, 500) : json({ data });
+  const admin = createStaticAdminClient();
+  const { data, error } = await admin.from('aj_operator_keys').select(columns).order('created_at', { ascending: false });
+  if (!missingScope(error)) return error ? json({ error: 'Não foi possível consultar as chaves.' }, 500) : json({ data });
+  const legacy = await admin.from('aj_operator_keys').select(legacyColumns).order('created_at', { ascending: false });
+  return legacy.error ? json({ error: 'Não foi possível consultar as chaves.' }, 500)
+    : json({ data: (legacy.data ?? []).map(legacyScope) });
 }
 
 export async function POST(req: Request) {
@@ -41,11 +51,17 @@ export async function POST(req: Request) {
   if (!parsed.success) return json({ error: 'Informe um nome de até 120 caracteres.' }, 422);
   const { token, prefix, hash } = makeApiKeyToken('ncrmop_');
   const admin = createStaticAdminClient();
-  const { data, error } = await admin.from('aj_operator_keys')
-    .insert({ name: parsed.data.name, key_prefix: prefix, key_hash: hash, created_by: actor.id })
-    .select(columns).single();
+  const row = { name: parsed.data.name, key_prefix: prefix, key_hash: hash, created_by: actor.id };
+  let result: KeyResult = await admin.from('aj_operator_keys')
+    .insert({ ...row, scope: parsed.data.scope }).select(columns).single();
+  if (missingScope(result.error)) {
+    if (parsed.data.scope !== 'ai_agents_read') return json({ error: 'A chave da esteira precisa da migração do banco.' }, 409);
+    const legacy = await admin.from('aj_operator_keys').insert(row).select(legacyColumns).single();
+    result = { data: legacy.data && legacyScope(legacy.data), error: legacy.error };
+  }
+  const { data, error } = result;
   if (error || !data) return json({ error: 'Não foi possível criar a chave.' }, 500);
-  await logSecurityEvent({ action: 'api_key.created', actorId: actor.id, resourceType: 'aj_operator_key', resourceId: data.id, severity: 'warning' }, req, admin);
+  await logSecurityEvent({ action: 'api_key.created', actorId: actor.id, resourceType: 'aj_operator_key', resourceId: data.id, severity: 'warning', details: { scope: parsed.data.scope } }, req, admin);
   return json({ data, token }, 201);
 }
 
@@ -55,9 +71,16 @@ export async function DELETE(req: Request) {
   const parsed = revokeInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return json({ error: 'Selecione uma chave válida.' }, 422);
   const admin = createStaticAdminClient();
-  const { data, error } = await admin.from('aj_operator_keys')
+  const revoke = () => admin.from('aj_operator_keys')
     .update({ revoked_at: new Date().toISOString(), revoked_by: actor.id })
-    .eq('id', parsed.data.id).is('revoked_at', null).select(columns).maybeSingle();
+    .eq('id', parsed.data.id).is('revoked_at', null);
+  let result: KeyResult = await revoke().select(columns).maybeSingle();
+  if (missingScope(result.error)) {
+    // A instrução falhou inteira (nada foi revogado): repete sem a coluna.
+    const legacy = await revoke().select(legacyColumns).maybeSingle();
+    result = { data: legacy.data && legacyScope(legacy.data), error: legacy.error };
+  }
+  const { data, error } = result;
   if (error) return json({ error: 'Não foi possível revogar a chave.' }, 500);
   if (!data) return json({ error: 'A chave não está ativa.' }, 404);
   await logSecurityEvent({ action: 'api_key.revoked', actorId: actor.id, resourceType: 'aj_operator_key', resourceId: data.id, severity: 'warning' }, req, admin);

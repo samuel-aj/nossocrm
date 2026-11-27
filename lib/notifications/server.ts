@@ -8,8 +8,9 @@ import { connectionIncidentNotices } from './connectionIncidents';
 import { entryRecoveryNotices } from './entryRecovery';
 import { hasFullOperationalAccess } from '@/lib/permissions/teamRoles';
 import { NOTIFICATION_CATCHUP_MS } from './feedWindow';
+import { FEEDBACK_STATUS_LABEL, type FeedbackStatus } from '@/lib/feedback/constants';
 
-const OFFLINE_ALERT_KINDS = ['human_handoff', 'wa_entry_recovery'];
+const OFFLINE_ALERT_KINDS = ['human_handoff', 'wa_entry_recovery', 'feedback'];
 
 interface MessageRow {id:string;conversation_id:string;wa_timestamp:string|null}
 interface ConversationRow {id:string;deal_id:string|null;contact_id:string|null;connection_id:string|null;wa_name:string|null;wa_phone:string;label_ids:string[];assigned_owner_id:string|null;created_at:string}
@@ -88,6 +89,9 @@ export async function visibleJournalNotices(auth: Auth, ctx: Awaited<ReturnType<
   if(alerts.error) throw alerts.error;
   const alertDeals=alerts.data?.length ? await auth.admin.from('deals').select('id,title,board_id,owner_id,active_alert').eq('organization_id',auth.user.organizationId).in('id',alerts.data.map(a=>a.deal_id)).eq('owner_id',auth.user.id).is('deleted_at',null) : {data:[],error:null};
   if(alertDeals.error) throw alertDeals.error;
+  const feedbackIds=events.filter(e=>e.kind==='feedback' && p.alerts).map(e=>e.source_id);
+  const feedback=feedbackIds.length ? await auth.admin.from('feedback_requests').select('id,status,author_id').eq('organization_id',auth.user.organizationId).in('id',feedbackIds).eq('author_id',auth.user.id) : {data:[],error:null};
+  if(feedback.error) throw feedback.error;
   const messageIds=events.filter(e=>(e.kind==='message' && p.messages) || (e.kind==='audio_transcription' && p.alerts)).map(e=>e.source_id);
   const leadIds=events.filter(e=>e.kind==='lead' && p.leads && e.board_id !== null && p.boardIds.includes(e.board_id)).map(e=>e.source_id);
   const messages=messageIds.length ? await auth.admin.from('wa_messages').select('id,conversation_id,wa_timestamp').eq('organization_id',auth.user.organizationId).in('id',messageIds).eq('direction','in').is('deleted_at',null) : {data:[],error:null};
@@ -124,6 +128,12 @@ export async function visibleJournalNotices(auth: Auth, ctx: Awaited<ReturnType<
       const d=leadRows.find(d=>d.id===event.source_id);
       if(!d || !p.leads || !event.board_id || !p.boardIds.includes(event.board_id) || d.board_id!==event.board_id || !allowed(d)) continue;
       notices.push({id:String(event.id),kind:'lead',title:'Novo lead no board',message:`${d.title} · ${ctx.boards.find(b=>b.id===d.board_id)?.name}`,href:`/boards?board=${d.board_id}&deal=${d.id}`,createdAt:event.created_at});
+    } else if(event.kind==='feedback') {
+      const f=(feedback.data as Array<{id:string;status:FeedbackStatus;author_id:string|null}> | null)?.find(x=>x.id===event.source_id);
+      if(!p.alerts || !f || f.author_id!==auth.user.id) continue;
+      const negative=f.status==='nao_e_bug' || f.status==='descartado';
+      notices.push({id:String(event.id),kind:'alert',tone:negative?'red':'green',title:'Seu pedido de ajuste',
+        message:FEEDBACK_STATUS_LABEL[f.status] ?? 'Atualizado',href:`/suggestions?pedido=${f.id}`,createdAt:event.created_at});
     } else if(event.kind==='message' || event.kind==='audio_transcription' || event.kind==='human_handoff') {
       const audioFailed = event.kind==='audio_transcription';
       const handoff = event.kind==='human_handoff';

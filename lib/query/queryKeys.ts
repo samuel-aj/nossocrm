@@ -38,6 +38,7 @@ export const queryKeys = {
     companies: createQueryKeys('companies'),
     boards: createQueryKeys('boards'),
     suggestions: createQueryKeys('suggestions'),
+    feedback: createQueryKeys('feedback'),
 
     // Activities with custom extension for byDeal
     activities: createExtendedQueryKeys('activities', base => ({
