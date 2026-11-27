@@ -34,7 +34,7 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 - **Por quê:** O seletor de escritórios ficava na barra lateral do computador e sumia nas telas menores.
 - **Quem:** Samuel pediu e Codex implementou.
 - **Banco:** sem SQL.
-- **Para voltar:** `prod-pre-troca-contas-mobile` (etiqueta prevista para a publicação).
+- **Para voltar:** `prod-pre-troca-contas-mobile`.
 
 ### 27/11/2026 · Uma chave de operador para o Monitor da AJ
 - **Tipo:** Novo
