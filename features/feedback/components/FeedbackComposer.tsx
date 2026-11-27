@@ -8,10 +8,19 @@ import { uploadFeedbackFile, transcribeFeedbackAudio, type UploadedAttachment } 
 import { ALLOWED_MIME, FEEDBACK_KINDS, FEEDBACK_KIND_LABEL, FEEDBACK_LIMITS, type AttachmentKind, type FeedbackKind } from '@/lib/feedback/constants';
 import { useAudioRecorder } from '../hooks/useAudioRecorder';
 
-interface Item { key: string; name: string; status: 'enviando' | 'pronto' | 'erro'; data?: UploadedAttachment }
+interface Item { key: string; name: string; kind: AttachmentKind; status: 'enviando' | 'pronto' | 'erro'; data?: UploadedAttachment }
 
 const kindOf = (mime: string): AttachmentKind | null =>
   ALLOWED_MIME.image.includes(mime) ? 'image' : ALLOWED_MIME.audio.includes(mime) ? 'audio' : ALLOWED_MIME.file.includes(mime) ? 'file' : null;
+
+const MAX_PER_KIND: Record<AttachmentKind, number> = {
+  image: FEEDBACK_LIMITS.images, file: FEEDBACK_LIMITS.files, audio: FEEDBACK_LIMITS.audios,
+};
+const LIMIT_MESSAGE: Record<AttachmentKind, string> = {
+  image: `Até ${FEEDBACK_LIMITS.images} imagens por envio.`,
+  file: `Até ${FEEDBACK_LIMITS.files} arquivos por envio.`,
+  audio: 'Só um áudio por envio.',
+};
 
 export function FeedbackComposer({ screenPath, onSent }: { screenPath: string; onSent?: () => void }) {
   const [body, setBody] = useState('');
@@ -24,34 +33,50 @@ export function FeedbackComposer({ screenPath, onSent }: { screenPath: string; o
   const { addToast } = useToast();
 
   const addFiles = useCallback((files: File[]) => {
+    // Conta o que já está na caixa (pronto ou ainda subindo) e o que entra neste lote.
+    const used: Record<AttachmentKind, number> = { image: 0, file: 0, audio: 0 };
+    for (const i of items) if (i.status !== 'erro') used[i.kind] += 1;
+    const limitsHit = new Set<AttachmentKind>();
+    const added: Item[] = [];
     for (const file of files) {
       const mime = (file.type || '').split(';')[0];
       const k = kindOf(mime);
-      const count = (x: AttachmentKind) => items.filter(i => i.data?.kind === x).length;
       if (!k) { addToast(`${file.name}: tipo de arquivo não aceito.`, 'error'); continue; }
       if (file.size > FEEDBACK_LIMITS.bytes) { addToast(`${file.name}: maior que 10 MB.`, 'error'); continue; }
-      if ((k === 'image' && count('image') >= FEEDBACK_LIMITS.images) || (k === 'file' && count('file') >= FEEDBACK_LIMITS.files)) {
-        addToast('Limite de anexos atingido.', 'error'); continue;
-      }
+      if (used[k] >= MAX_PER_KIND[k]) { limitsHit.add(k); continue; }
+      used[k] += 1;
       const key = `${file.name}-${crypto.randomUUID()}`;
-      setItems(prev => [...prev, { key, name: file.name, status: 'enviando' }]);
+      added.push({ key, name: file.name, kind: k, status: 'enviando' });
       uploadFeedbackFile(file, file.name, k)
         .then(data => setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'pronto', data } : i)))
-        .catch(() => setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'erro' } : i)));
+        .catch(() => {
+          setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'erro' } : i));
+          addToast(`Não foi possível enviar ${file.name}.`, 'error');
+        });
     }
+    if (added.length) setItems(prev => [...prev, ...added]);
+    for (const k of limitsHit) addToast(LIMIT_MESSAGE[k], 'error');
   }, [items, addToast]);
 
   const onAudio = useCallback(async (blob: Blob) => {
     const key = `audio-${crypto.randomUUID()}`;
     const name = 'audio.mp3';
-    setItems(prev => [...prev.filter(i => i.data?.kind !== 'audio'), { key, name, status: 'enviando' }]);
+    // Uma gravação nova substitui o áudio que já estava na caixa.
+    setItems(prev => [...prev.filter(i => i.kind !== 'audio'), { key, name, kind: 'audio', status: 'enviando' }]);
+    let data: UploadedAttachment;
     try {
-      const data = await uploadFeedbackFile(blob, name, 'audio');
-      setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'pronto', data } : i));
-      setTranscribing(true);
-      setTranscript(await transcribeFeedbackAudio(data.path));
+      data = await uploadFeedbackFile(blob, name, 'audio');
     } catch {
       setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'erro' } : i));
+      addToast('Não foi possível enviar o áudio.', 'error');
+      return;
+    }
+    setItems(prev => prev.map(i => i.key === key ? { ...i, status: 'pronto', data } : i));
+    // Sem transcrição o áudio continua pronto: a esteira transcreve depois.
+    setTranscribing(true);
+    try {
+      setTranscript(await transcribeFeedbackAudio(data.path));
+    } catch {
       addToast('Não deu para transcrever agora. O áudio vai junto mesmo assim.', 'info');
     } finally {
       setTranscribing(false);
