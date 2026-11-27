@@ -21,8 +21,8 @@ CREATE TABLE public.wa_ai_agent_chunks (
 );
 GRANT SELECT, UPDATE ON public.wa_ai_agents, public.wa_ai_agent_documents TO service_role;
 GRANT SELECT, INSERT, DELETE ON public.wa_ai_agent_chunks TO service_role;
-\ir ../migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql
-\ir ../migrations/20261127120000_wa_ai_review_knowledge_gap.sql
+\ir ../migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql
+\ir ../migrations/20261127172229_wa_ai_review_knowledge_gap.sql
 
 -- Chaves sintéticas para repetir o teste sob o papel do servidor.
 CREATE TEMP TABLE fixture AS SELECT gen_random_uuid() AS org, gen_random_uuid() AS other_org,

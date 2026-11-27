@@ -16,7 +16,7 @@ type DbError = { message: string; code?: string } | null;
 
 const MISSING_SCHEMA_CODES = new Set(['42P01', '42703', 'PGRST204', 'PGRST205']);
 
-/** Tabela ou coluna das dúvidas ainda não criada (migração 20261125120000 não aplicada). */
+/** Tabela ou coluna das dúvidas ainda não criada (migração 20261127171912 não aplicada). */
 export function isMissingGapsSchema(error: DbError): boolean {
   if (!error) return false;
   if (error.code && MISSING_SCHEMA_CODES.has(error.code)) return true;

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql'), 'utf8');
+const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql'), 'utf8');
 
 describe('migração das dúvidas sem resposta', () => {
   it('cria a tabela privada, acessível só pelo servidor', () => {

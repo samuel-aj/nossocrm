@@ -121,7 +121,7 @@ Regras do registro:
 - **Regra:** a tabela de dúvidas tem RLS ativa. A chave de serviço é a única chave da aplicação com acesso direto à tabela e às funções de registro e revisão. O servidor confere o escritório do agente, do documento sugerido e da conversa. O painel exige um administrador de um escritório com agentes liberados. O administrador escolhe a resposta e o documento desse agente antes de incluir o texto na base.
 - **Por quê:** as dúvidas nascem de conversas com clientes. Separar o registro da aprovação impede que uma sugestão do agente vire orientação para atendimentos futuros por conta própria.
 - **Aprovação e publicação:** pendentes no PR #85.
-- **Onde fica:** migrações `20261125120000_wa_ai_agent_knowledge_gaps.sql` e `20261127120000_wa_ai_review_knowledge_gap.sql`, rotas `app/api/wa-agents` e `lib/wa-agents/knowledgeGaps.ts`.
+- **Onde fica:** migrações `20261127171912_wa_ai_agent_knowledge_gaps.sql` e `20261127172229_wa_ai_review_knowledge_gap.sql`, rotas `app/api/wa-agents` e `lib/wa-agents/knowledgeGaps.ts`.
 - **Se remover:** a revisão pode ser contornada e dúvidas de um escritório podem ficar acessíveis a outro.
 
 ---

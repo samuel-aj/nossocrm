@@ -45,7 +45,7 @@ Função `recordKnowledgeGap` em `lib/wa-agents/knowledgeGaps.ts`, usada pelo mo
 
 ## Banco (migração aditiva)
 
-Arquivo `supabase/migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql` (versão posterior à última da `origin/main`, `20261124204817`).
+Arquivo `supabase/migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql` (versão posterior à última da `origin/main`, `20261124204817`).
 
 Tabela `wa_ai_agent_knowledge_gaps`:
 

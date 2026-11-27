@@ -33,8 +33,8 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 - **O que mudou:** em Recursos, o administrador pode ativar “Aprender com dúvidas sem resposta” para cada agente. Na aba Conhecimento, ele revisa as dúvidas registradas e escolhe quais respostas incluir na base. Perguntas registradas apenas no simulador recebem a etiqueta “Só no teste”.
 - **Por quê:** aproveitar dúvidas recorrentes dos clientes e permitir que o escritório confira a resposta antes de disponibilizá-la ao agente.
 - **Quem:** solicitado por Samuel, implementado por Claude Code e revisado por Codex.
-- **Banco:** migrações `20261125120000_wa_ai_agent_knowledge_gaps.sql` e `20261127120000_wa_ai_review_knowledge_gap.sql`. Reversão em `docs/aprendizado-agente-rollback.sql`.
-- **Para voltar:** `prod-pre-aprendizado-agente` (criar na publicação).
+- **Banco:** migrações `20261127171912_wa_ai_agent_knowledge_gaps.sql` e `20261127172229_wa_ai_review_knowledge_gap.sql`. Reversão em `docs/aprendizado-agente-rollback.sql`.
+- **Para voltar:** `prod-pre-aprendizado-agente`.
 
 ### 27/11/2026 · Sino de notificações no celular
 - **Tipo:** Melhoria

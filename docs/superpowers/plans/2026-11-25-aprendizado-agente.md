@@ -21,7 +21,7 @@
 | Arquivo | Papel |
 |---|---|
 | `lib/wa-agents/knowledgeGapsShared.ts` (novo) | Tipos, limites, esquema das ações e funções de texto (sem dependência de servidor) |
-| `supabase/migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql` (novo) | Tabela, `gap_id` nos trechos, RPC de registro |
+| `supabase/migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql` (novo) | Tabela, `gap_id` nos trechos, RPC de registro |
 | `lib/wa-agents/learnedAnswers.ts` (novo) | Leitura das respostas incluídas e devolução ao excluir documento |
 | `lib/wa-agents/knowledgeGaps.ts` (novo) | Registro, reporter por execução, lista, ações de revisão |
 | `lib/wa-agents/types.ts`, `tools.ts`, `context.ts`, `engine.ts`, `test.ts`, `knowledge.ts` | Opção, ferramenta, linha do prompt, ligação no motor e no teste, reprocessamento |
@@ -327,7 +327,7 @@ Expected: PASS.
 ### Task 2: Migração do banco
 
 **Files:**
-- Create: `supabase/migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql`
+- Create: `supabase/migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql`
 - Test: `lib/wa-agents/knowledgeGapsMigration.test.ts`
 
 - [ ] **Step 1: Escrever o teste** (protege as regras de acesso do arquivo)
@@ -337,7 +337,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261125120000_wa_ai_agent_knowledge_gaps.sql'), 'utf8');
+const sql = readFileSync(join(process.cwd(), 'supabase/migrations/20261127171912_wa_ai_agent_knowledge_gaps.sql'), 'utf8');
 
 describe('migração das dúvidas sem resposta', () => {
   it('cria a tabela privada, acessível só pelo servidor', () => {
@@ -1270,7 +1270,7 @@ type DbError = { message: string; code?: string } | null;
 
 const MISSING_SCHEMA_CODES = new Set(['42P01', '42703', 'PGRST204', 'PGRST205']);
 
-/** Tabela ou coluna das dúvidas ainda não criada (migração 20261125120000 não aplicada). */
+/** Tabela ou coluna das dúvidas ainda não criada (migração 20261127171912 não aplicada). */
 export function isMissingGapsSchema(error: DbError): boolean {
   if (!error) return false;
   if (error.code && MISSING_SCHEMA_CODES.has(error.code)) return true;

@@ -5,8 +5,8 @@
 -- também desfaz a estrutura exclusiva do recurso. Os arquivos do Storage ficam intactos.
 -- Enquanto o código antigo estiver em uso, evite excluir, alterar os metadados ou
 -- reprocessar documentos com respostas incluídas: ele recria os trechos só do arquivo.
--- Para reativar, reaplique 20261125120000_wa_ai_agent_knowledge_gaps.sql e, em seguida,
--- 20261127120000_wa_ai_review_knowledge_gap.sql antes do código novo.
+-- Para reativar, reaplique 20261127171912_wa_ai_agent_knowledge_gaps.sql e, em seguida,
+-- 20261127172229_wa_ai_review_knowledge_gap.sql antes do código novo.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
