@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DELETE, GET, POST } from './route';
 
 const db = vi.hoisted(() => ({
@@ -22,7 +22,7 @@ const req = (method: string, body?: object, origin = 'https://crm.example') => n
   method, headers: { origin, host: 'crm.example', 'x-forwarded-proto': 'https' }, body: body && JSON.stringify(body),
 });
 beforeEach(() => {
-  vi.clearAllMocks(); db.role = 'super_admin'; db.session = true;
+  vi.resetAllMocks(); db.role = 'super_admin'; db.session = true;
   db.from.mockReturnValue(db); db.insert.mockReturnValue(db); db.update.mockReturnValue(db);
   db.select.mockReturnValue(db); db.eq.mockReturnValue(db); db.is.mockReturnValue(db);
   db.order.mockResolvedValue({ data: [record] }); db.single.mockResolvedValue({ data: record });
@@ -71,6 +71,60 @@ it('grava o escopo escolhido, usa a leitura de agentes como padrão e recusa esc
   }
   expect(db.from).not.toHaveBeenCalled();
 });
+describe('antes da migração do escopo (sem a coluna scope)', () => {
+  const noColumnSelect = { data: null, error: { code: '42703', message: 'column aj_operator_keys.scope does not exist' } };
+  const noColumnInsert = { data: null, error: { code: 'PGRST204', message: "Could not find the 'scope' column of 'aj_operator_keys' in the schema cache" } };
+  const fieldsOf = (call: unknown[]) => String(call[0]).split(',');
+
+  it('lista as chaves sem a coluna e as marca como leitura de agentes', async () => {
+    db.order.mockResolvedValueOnce(noColumnSelect).mockResolvedValueOnce({ data: [record], error: null });
+    const res = await GET(req('GET'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ data: [{ ...record, scope: 'ai_agents_read' }] });
+    expect(fieldsOf(db.select.mock.calls[0])).toContain('scope');
+    expect(fieldsOf(db.select.mock.calls[1])).not.toContain('scope');
+  });
+
+  it('cria a chave do Monitor sem a coluna', async () => {
+    db.single.mockResolvedValueOnce(noColumnInsert).mockResolvedValueOnce({ data: record, error: null });
+    const res = await POST(req('POST', { name: record.name }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).data).toEqual({ ...record, scope: 'ai_agents_read' });
+    expect(db.insert).toHaveBeenCalledTimes(2);
+    expect(db.insert.mock.calls[1][0]).not.toHaveProperty('scope');
+    expect(fieldsOf(db.select.mock.calls[1])).not.toContain('scope');
+    expect(logSecurityEvent).toHaveBeenCalledWith(expect.objectContaining({ action: 'api_key.created', details: { scope: 'ai_agents_read' } }), expect.anything(), expect.anything());
+  });
+
+  it('recusa a chave da esteira com 409 até a migração', async () => {
+    db.single.mockResolvedValueOnce(noColumnInsert);
+    const res = await POST(req('POST', { name: 'Esteira de teste', scope: 'feedback' }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'A chave da esteira precisa da migração do banco.' });
+    expect(db.insert).toHaveBeenCalledTimes(1);
+    expect(logSecurityEvent).not.toHaveBeenCalled();
+  });
+
+  it('revoga a chave sem a coluna', async () => {
+    db.maybeSingle.mockResolvedValueOnce(noColumnSelect).mockResolvedValueOnce({ data: record, error: null });
+    const res = await DELETE(req('DELETE', { id: keyId }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data).toEqual({ ...record, scope: 'ai_agents_read' });
+    expect(fieldsOf(db.select.mock.calls[1])).not.toContain('scope');
+  });
+
+  it('outros erros do banco continuam 500, sem nova tentativa', async () => {
+    const failure = { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } };
+    db.order.mockResolvedValueOnce(failure);
+    expect((await GET(req('GET'))).status).toBe(500);
+    db.single.mockResolvedValueOnce(failure);
+    expect((await POST(req('POST', { name: record.name }))).status).toBe(500);
+    db.maybeSingle.mockResolvedValueOnce(failure);
+    expect((await DELETE(req('DELETE', { id: keyId }))).status).toBe(500);
+    expect(db.select).toHaveBeenCalledTimes(3);
+  });
+});
+
 it('revoga apenas a chave ativa solicitada e identifica o administrador', async () => {
   expect((await DELETE(req('DELETE', { id: keyId }))).status).toBe(200);
   expect(db.update).toHaveBeenCalledWith({ revoked_by: 'actor', revoked_at: expect.any(String) });

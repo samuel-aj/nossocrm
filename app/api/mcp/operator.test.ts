@@ -173,6 +173,49 @@ it('nega o acesso quando não consegue ler o escopo da chave', async () => {
   expect(onlyAuthentication()).toBe(true);
 });
 
+it('antes da migração do escopo, usa a autenticação antiga e trata a chave como leitura de agentes', async () => {
+  const onlyAuthFunctions = () => m.adminRpc.mock.calls.every(([name]) =>
+    name === 'aj_operator_authenticate_scoped' || name === 'aj_operator_authenticate');
+  // PostgREST (função fora do cache) e Postgres (função inexistente).
+  for (const code of ['PGRST202', '42883']) {
+    m.adminRpc.mockReset();
+    resetRateLimits();
+    m.adminRpc.mockImplementation(async (name, args) => {
+      if (name === 'aj_operator_authenticate_scoped') {
+        return { data: null, error: { code, message: 'function public.aj_operator_authenticate_scoped(p_key_hash) does not exist' } };
+      }
+      if (name === 'aj_operator_authenticate') return { data: args.p_key_hash === hash ? keyId : null, error: null };
+      if (name === 'aj_operator_read') return { data: { id: agent, system_prompt: 'Roteiro fictício' }, error: null };
+      throw new Error('Unexpected RPC');
+    });
+    const listed = await call('tools/list');
+    expect(listed.status).toBe(200);
+    expect((await listed.json()).result.tools.map((t: { name: string }) => t.name).sort()).toEqual(allowed);
+    const refused = await call('tools/call', { name: 'crm.feedback.update', arguments: { requestId: randomUUID(), status: 'descartado' } });
+    expect(refused.status).toBe(400);
+    expect(onlyAuthFunctions()).toBe(true);
+    const read = await call('tools/call', { name: 'crm.ai_agents.get', arguments: { agentId: agent } });
+    expect(await read.json()).toMatchObject({ result: { structuredContent: { system_prompt: 'Roteiro fictício' } } });
+    expect(m.adminRpc).toHaveBeenCalledWith('aj_operator_authenticate', { p_key_hash: hash });
+    expect(m.adminRpc).toHaveBeenCalledWith('aj_operator_read', { p_key_id: keyId, p_tool: 'crm.ai_agents.get', p_args: { agentId: agent } });
+    // Na função antiga, chave desconhecida continua 401 e banco fora do ar continua 503.
+    expect((await call('tools/list', {}, 'ncrmop_' + randomBytes(24).toString('base64url'))).status).toBe(401);
+    m.adminRpc.mockResolvedValueOnce({ data: null, error: { code } })
+      .mockResolvedValueOnce({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } });
+    expect((await call('tools/list')).status).toBe(503);
+  }
+});
+
+it('outros erros da autenticação nova continuam 503, sem tentar a função antiga', async () => {
+  for (const error of [{ code: '57014', message: 'canceling statement due to statement timeout' }, { code: 'PGRST301', message: 'JWT expired' }, { message: 'fetch failed' }]) {
+    m.adminRpc.mockResolvedValueOnce({ data: null, error });
+    const res = await call('tools/list');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { data: { code: 'AUTH_UNAVAILABLE' } } });
+  }
+  expect(onlyAuthentication()).toBe(true);
+});
+
 it('keeps ordinary keys on the organization validator, with the server-resolved owner and organization', async () => {
   const response = await call('tools/list', {}, ordinary, { 'x-org-id': randomUUID() });
   expect(response.status).toBe(200);
