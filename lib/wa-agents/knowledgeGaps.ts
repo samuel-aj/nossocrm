@@ -7,7 +7,6 @@
  * Revisão: a resposta aprovada vira um trecho extra (gap_id) do documento
  * escolhido, sem alterar o arquivo original.
  */
-import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createUsageContext } from '@/lib/ai-usage/budget';
 import { runWithUsageContext } from '@/lib/ai-usage/context';
@@ -17,7 +16,7 @@ import {
   agentEmbeddingProfile,
   documentHeader,
   embedTexts,
-  loadAgentDocuments,
+  isProcessingStale,
   loadDocument,
   MIN_SIMILARITY,
   processDocument,
@@ -45,7 +44,7 @@ import {
   type KnowledgeGapRow,
   type KnowledgeGapStatus,
 } from './knowledgeGapsShared';
-import { isMissingGapsSchema, LEARNED_CHUNK_IDX_BASE } from './learnedAnswers';
+import { isMissingGapsSchema } from './learnedAnswers';
 import { AGENT_CHUNKS_MAX_PER_AGENT, AGENT_DOCS_MAX_PER_AGENT, WA_AGENT_FILES_BUCKET, type AgentDocumentRow } from './types';
 
 export const KNOWLEDGE_GAPS_TABLE = 'wa_ai_agent_knowledge_gaps';
@@ -311,6 +310,7 @@ async function updateGap(
     .eq('agent_id', gap.agent_id)
     .eq('id', gap.id)
     .eq('status', expected)
+    .eq('updated_at', gap.updated_at)
     .select(GAP_COLUMNS);
   if (error) throw new Error(error.message);
   const row = ((data ?? []) as unknown as KnowledgeGapRow[])[0];
@@ -323,49 +323,59 @@ async function ensureLearnedAnswersDocument(
   admin: SupabaseClient,
   input: { organizationId: string; agentId: string; userId: string }
 ): Promise<AgentDocumentRow> {
-  const docs = await loadAgentDocuments(admin, input.organizationId, input.agentId);
-  const existing = docs.find(isLearnedAnswersDocument);
-  if (existing) {
-    if (existing.status !== 'ready') {
-      throw new KnowledgeGapError('DOCUMENT_NOT_READY', `O documento “${LEARNED_DOCUMENT_TITLE}” ainda não está pronto. Tente de novo em instantes.`, 409);
-    }
-    return existing;
-  }
-  if (docs.length >= AGENT_DOCS_MAX_PER_AGENT) {
+  const { organizationId, agentId, userId } = input;
+  const table = () => admin.from('wa_ai_agent_documents');
+  const { data: documents, error: listError } = await table().select('*')
+    .eq('organization_id', organizationId).eq('agent_id', agentId).order('created_at', { ascending: false });
+  if (listError) throw new Error('Não foi possível consultar os documentos do agente.');
+
+  const docs = (documents ?? []) as AgentDocumentRow[];
+  // A PK reserva um documento gerado por agente; documentos enviados mantêm seus próprios IDs e títulos.
+  const path = agentFilePath(organizationId, agentId, 'doc', LEARNED_DOCUMENT_FILE_NAME, agentId);
+  const owned = docs.find(doc => doc.id === agentId && doc.storage_path === path);
+  const existing = owned ?? docs.find(isLearnedAnswersDocument);
+  const pending = () => new KnowledgeGapError('DOCUMENT_NOT_READY', 'O documento de respostas ainda não está pronto. Tente novamente em instantes.', 409);
+  if (existing?.status === 'ready') return existing;
+  if (existing && (!owned || (owned.status === 'processing' && !isProcessingStale(owned)))) throw pending();
+  if (!existing && docs.length >= AGENT_DOCS_MAX_PER_AGENT) {
     throw new KnowledgeGapError('DOCUMENT_LIMIT', `Limite de ${AGENT_DOCS_MAX_PER_AGENT} documentos por agente. Escolha um documento existente.`, 400);
   }
+
   const body = Buffer.from(LEARNED_DOCUMENT_TEXT, 'utf8');
-  const path = agentFilePath(input.organizationId, input.agentId, 'doc', LEARNED_DOCUMENT_FILE_NAME, randomUUID());
-  const { error: uploadError } = await admin.storage.from(WA_AGENT_FILES_BUCKET).upload(path, body, { contentType: 'text/markdown', upsert: false });
-  if (uploadError) throw new Error(`Falha ao criar o arquivo do documento: ${uploadError.message}`);
-  const { data, error } = await admin
-    .from('wa_ai_agent_documents')
-    .insert({
-      organization_id: input.organizationId,
-      agent_id: input.agentId,
-      name: LEARNED_DOCUMENT_FILE_NAME,
-      title: LEARNED_DOCUMENT_TITLE,
-      description: LEARNED_DOCUMENT_DESCRIPTION,
-      tags: [],
-      mime: 'text/markdown',
-      size_bytes: body.byteLength,
-      storage_path: path,
-      status: 'processing',
-      error: null,
-      chunk_count: 0,
-      created_by: input.userId,
-    })
-    .select('id')
-    .single();
-  if (error || !data) throw new Error(`Falha ao registrar o documento: ${error?.message ?? 'sem resposta'}`);
-  const documentId = (data as { id: string }).id;
-  const processed = await processDocument(admin, { organizationId: input.organizationId, documentId });
-  if (!processed.ok) {
-    throw new KnowledgeGapError('INDEX_FAILED', `Não foi possível preparar o documento: ${processed.error ?? 'erro desconhecido'}`, 502);
+  const reservation = owned
+    ? table().update({ status: 'processing', error: null, updated_at: new Date().toISOString() })
+      .eq('id', agentId).eq('agent_id', agentId).eq('organization_id', organizationId)
+      .eq('status', owned.status).eq('updated_at', owned.updated_at)
+    : table().insert({
+      id: agentId, organization_id: organizationId, agent_id: agentId, created_by: userId,
+      name: LEARNED_DOCUMENT_FILE_NAME, title: LEARNED_DOCUMENT_TITLE, description: LEARNED_DOCUMENT_DESCRIPTION,
+      tags: [], mime: 'text/markdown', size_bytes: body.byteLength, storage_path: path, status: 'processing', chunk_count: 0,
+    });
+  const { data: reserved, error } = await reservation.select('updated_at').maybeSingle();
+  if (error && error.code !== '23505') throw new Error('Não foi possível reservar o documento de respostas.');
+  if (error || !reserved) {
+    const current = await loadDocument(admin, organizationId, agentId);
+    if (current?.agent_id === agentId && current.storage_path === path && current.status === 'ready') return current;
+    throw pending();
   }
-  const doc = await loadDocument(admin, input.organizationId, documentId);
-  if (!doc || doc.status !== 'ready') {
-    throw new KnowledgeGapError('INDEX_FAILED', `Não foi possível preparar o documento “${LEARNED_DOCUMENT_TITLE}”.`, 502);
+
+  try {
+    // O mesmo cabeçalho e o mesmo caminho permitem repetir um upload cuja confirmação se perdeu.
+    const upload = await admin.storage.from(WA_AGENT_FILES_BUCKET).upload(path, body, { contentType: 'text/markdown', upsert: true });
+    if (upload.error) throw new Error('Falha no envio do arquivo de respostas.');
+    const processed = await processDocument(admin, { organizationId, documentId: agentId });
+    if (!processed.ok) throw new Error('Falha no processamento do documento de respostas.');
+  } catch {
+    // Se o processo já avançou, não sobrescreve seu estado; uma reserva interrompida também expira.
+    const recovery = await table().update({ status: 'error', error: 'A preparação foi interrompida. Tente novamente.', updated_at: new Date().toISOString() })
+      .eq('id', agentId).eq('agent_id', agentId).eq('organization_id', organizationId)
+      .eq('status', 'processing').eq('updated_at', reserved.updated_at);
+    if (recovery.error) console.error('[wa-agents] falha ao liberar a reserva do documento', recovery.error.code);
+    throw new KnowledgeGapError('INDEX_FAILED', 'Não foi possível preparar o documento. Tente novamente.', 502);
+  }
+  const doc = await loadDocument(admin, organizationId, agentId);
+  if (!doc || doc.agent_id !== agentId || doc.storage_path !== path || doc.status !== 'ready') {
+    throw new KnowledgeGapError('INDEX_FAILED', 'Não foi possível confirmar o preparo do documento. Tente novamente.', 502);
   }
   return doc;
 }
@@ -387,13 +397,6 @@ async function resolveDestination(
   return doc;
 }
 
-async function assertChunkRoom(admin: SupabaseClient, organizationId: string, agentId: string): Promise<void> {
-  const profile = await agentEmbeddingProfile(admin, organizationId, agentId);
-  if (profile.chunks + 1 > AGENT_CHUNKS_MAX_PER_AGENT) {
-    throw new KnowledgeGapError('CHUNK_LIMIT', `Limite de ${AGENT_CHUNKS_MAX_PER_AGENT} trechos por agente atingido. Remova documentos antes de incluir mais respostas.`, 400);
-  }
-}
-
 /** Embedding do trecho no modelo do documento (cabeçalho igual ao dos trechos do arquivo); sem modelo, fica só a busca por texto. */
 async function embedLearnedChunk(admin: SupabaseClient, doc: AgentDocumentRow, content: string): Promise<{ embedding: number[] | null; model: string | null }> {
   if (!doc.embedding_model) return { embedding: null, model: null };
@@ -407,57 +410,58 @@ async function embedLearnedChunk(admin: SupabaseClient, doc: AgentDocumentRow, c
       return embedded ? { embedding: embedded.embeddings[0] ?? null, model: embedded.model } : { embedding: null, model: null };
     });
   } catch (e) {
-    throw new KnowledgeGapError('INDEX_FAILED', `Não foi possível indexar a resposta agora: ${errorMessage(e)}`, 502);
+    console.error('[wa-agents] indexação da resposta aprendida falhou', e);
+    throw new KnowledgeGapError('INDEX_FAILED', 'Não foi possível indexar a resposta agora. Tente novamente.', 502);
   }
 }
 
-async function insertLearnedChunk(admin: SupabaseClient, doc: AgentDocumentRow, gapId: string, content: string): Promise<string> {
-  const { embedding, model } = await embedLearnedChunk(admin, doc, content);
-  const { data, error } = await admin
-    .from('wa_ai_agent_chunks')
-    .insert({
-      organization_id: doc.organization_id,
-      agent_id: doc.agent_id,
-      document_id: doc.id,
-      idx: LEARNED_CHUNK_IDX_BASE,
-      content,
-      embedding,
-      embedding_model: model,
-      gap_id: gapId,
-    })
-    .select('id')
-    .single();
-  if (error || !data) throw new Error(`Falha ao gravar o trecho da resposta: ${error?.message ?? 'sem resposta'}`);
-  return (data as { id: string }).id;
-}
-
-/** Apaga os trechos da dúvida (menos `keepChunkId`, o trecho novo de uma edição). */
-async function deleteLearnedChunks(admin: SupabaseClient, organizationId: string, gapId: string, keepChunkId?: string): Promise<void> {
-  let query = admin.from('wa_ai_agent_chunks').delete().eq('organization_id', organizationId).eq('gap_id', gapId);
-  if (keepChunkId) query = query.neq('id', keepChunkId);
-  const { error } = await query;
-  if (error) throw new Error(`Falha ao apagar o trecho da resposta: ${error.message}`);
-}
-
-async function deleteChunk(admin: SupabaseClient, organizationId: string, chunkId: string): Promise<void> {
-  const { error } = await admin.from('wa_ai_agent_chunks').delete().eq('organization_id', organizationId).eq('id', chunkId);
-  if (error) throw new Error(error.message);
-}
-
-/** chunk_count do documento pela contagem real dos trechos (arquivo + respostas aprendidas). */
-async function refreshChunkCount(admin: SupabaseClient, organizationId: string, documentId: string): Promise<void> {
-  const { count, error } = await admin
-    .from('wa_ai_agent_chunks')
-    .select('id', { count: 'exact', head: true })
-    .eq('organization_id', organizationId)
-    .eq('document_id', documentId);
-  if (error) throw new Error(error.message);
-  const { error: updateError } = await admin
-    .from('wa_ai_agent_documents')
-    .update({ chunk_count: count ?? 0, updated_at: new Date().toISOString() })
-    .eq('organization_id', organizationId)
-    .eq('id', documentId);
-  if (updateError) throw new Error(updateError.message);
+/** O banco troca o trecho, atualiza a dúvida e reconta os documentos em uma transação. */
+async function reviewKnowledgeGap(
+  admin: SupabaseClient,
+  gap: KnowledgeGapRow,
+  userId: string,
+  action: 'include' | 'edit' | 'remove',
+  answer?: {
+    document: AgentDocumentRow;
+    question: string;
+    text: string;
+    embedding: number[] | null;
+    model: string | null;
+  }
+): Promise<KnowledgeGapRow> {
+  const { data, error } = await admin.rpc('wa_ai_review_knowledge_gap', {
+    p_org: gap.organization_id,
+    p_agent: gap.agent_id,
+    p_gap: gap.id,
+    p_user: userId,
+    p_action: action,
+    p_expected_updated_at: gap.updated_at,
+    ...(answer && {
+      p_document: answer.document.id,
+      p_question: answer.question,
+      p_question_key: gapQuestionKey(answer.question),
+      p_answer: answer.text,
+      p_embedding: answer.embedding,
+      p_model: answer.model,
+      p_expected_document_model: answer.document.embedding_model,
+      p_chunk_limit: AGENT_CHUNKS_MAX_PER_AGENT,
+    }),
+  });
+  if (error) {
+    console.error('[wa-agents] revisão atômica da dúvida falhou', error.code);
+    throw new Error('Não foi possível concluir a revisão da dúvida.');
+  }
+  switch (data?.code) {
+    case 'NOT_FOUND': throw new KnowledgeGapError('NOT_FOUND', 'Dúvida não encontrada', 404);
+    case 'CONFLICT': throw conflict();
+    case 'DOCUMENT_NOT_FOUND': throw new KnowledgeGapError('DOCUMENT_NOT_FOUND', 'Documento de destino não encontrado', 404);
+    case 'DOCUMENT_NOT_READY': throw new KnowledgeGapError('DOCUMENT_NOT_READY', 'O documento mudou. Atualize a lista e tente novamente.', 409);
+    case 'CHUNK_LIMIT': throw new KnowledgeGapError('CHUNK_LIMIT', `Limite de ${AGENT_CHUNKS_MAX_PER_AGENT} trechos por agente atingido. Remova documentos antes de incluir mais respostas.`, 400);
+  }
+  if (!data?.gap || data.gap.id !== gap.id || data.gap.agent_id !== gap.agent_id || data.gap.organization_id !== gap.organization_id) {
+    throw new Error('Resposta inválida ao revisar a dúvida.');
+  }
+  return data.gap as KnowledgeGapRow;
 }
 
 /** Aplica uma ação da tela: incluir, editar, tirar da base, ignorar ou reabrir. */
@@ -467,6 +471,7 @@ export async function applyKnowledgeGapAction(
 ): Promise<KnowledgeGapRow> {
   const gap = await loadGap(admin, input.organizationId, input.agentId, input.gapId);
   const action = input.action;
+  if (action.expected_updated_at !== undefined && action.expected_updated_at !== gap.updated_at) throw conflict();
   switch (action.action) {
     case 'ignore':
       if (gap.status !== 'open') throw conflict();
@@ -474,13 +479,9 @@ export async function applyKnowledgeGapAction(
     case 'reopen':
       if (gap.status !== 'ignored') throw conflict();
       return updateGap(admin, gap, 'ignored', { status: 'open' });
-    case 'remove': {
+    case 'remove':
       if (gap.status !== 'included') throw conflict();
-      const updated = await updateGap(admin, gap, 'included', { status: 'ignored', document_id: null });
-      await deleteLearnedChunks(admin, gap.organization_id, gap.id);
-      if (gap.document_id) await refreshChunkCount(admin, gap.organization_id, gap.document_id);
-      return updated;
-    }
+      return reviewKnowledgeGap(admin, gap, input.userId, 'remove');
     case 'include':
     case 'edit': {
       const expected: KnowledgeGapStatus = action.action === 'include' ? 'open' : 'included';
@@ -494,28 +495,10 @@ export async function applyKnowledgeGapAction(
         documentId: action.document_id,
         createDocument: action.create_document === true,
       });
-      if (action.action === 'include' || doc.id !== gap.document_id) await assertChunkRoom(admin, input.organizationId, input.agentId);
-      const chunkId = await insertLearnedChunk(admin, doc, gap.id, learnedChunkContent(question, answer));
-      let updated: KnowledgeGapRow;
-      try {
-        updated = await updateGap(admin, gap, expected, {
-          status: 'included',
-          question,
-          question_key: gapQuestionKey(question),
-          answer,
-          document_id: doc.id,
-          reviewed_by: input.userId,
-          reviewed_at: new Date().toISOString(),
-        });
-      } catch (e) {
-        await deleteChunk(admin, input.organizationId, chunkId).catch(() => undefined);
-        throw e;
-      }
-      // O trecho antigo da edição sai (no mesmo documento ou no anterior)
-      await deleteLearnedChunks(admin, input.organizationId, gap.id, chunkId);
-      await refreshChunkCount(admin, input.organizationId, doc.id);
-      if (gap.document_id && gap.document_id !== doc.id) await refreshChunkCount(admin, input.organizationId, gap.document_id);
-      return updated;
+      const { embedding, model } = await embedLearnedChunk(admin, doc, learnedChunkContent(question, answer));
+      return reviewKnowledgeGap(admin, gap, input.userId, action.action, {
+        document: doc, question, text: answer, embedding, model,
+      });
     }
     default:
       throw conflict();

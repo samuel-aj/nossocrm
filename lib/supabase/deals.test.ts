@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ from: vi.fn(), organization: vi.fn() }));
 vi.mock('./client', () => ({ supabase: { from: mocks.from } }));
 vi.mock('./orgId', () => ({ getCurrentOrganizationId: mocks.organization, invalidateOrgCache: vi.fn() }));
@@ -46,6 +46,118 @@ describe('reassigning a lead contact', () => {
     mocks.from.mockReturnValue(query({ data: { id: dealId, title: 'New title' }, error: null }));
     expect((await dealsService.update(dealId, { title: 'New title' })).error).toBeNull();
     expect(mocks.from.mock.calls).toEqual([['deals']]);
+  });
+});
+
+describe('contacts created by the WhatsApp auto lead (version 8 ids)', () => {
+  const autoLeadContactId = '0f1e2d3c-4b5a-8697-8877-665544332211';
+  beforeEach(() => { vi.clearAllMocks(); mocks.organization.mockResolvedValue('current-org'); });
+  it('keeps the contact when creating a lead instead of storing the lead without one', async () => {
+    const board = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: contactId, organization_id: dealId }, error: null }) };
+    const lead = { insert: vi.fn().mockReturnThis(), select: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { id: dealId, contact_id: autoLeadContactId }, error: null }) };
+    const items = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockResolvedValue({ data: [], error: null }) };
+    mocks.from.mockImplementation(table => table === 'boards' ? board : table === 'deals' ? lead : items);
+    const input = { boardId: contactId, title: 'New lead', status: contactId, items: [], contactId: autoLeadContactId } as Parameters<typeof dealsService.create>[0];
+    const result = await dealsService.create(input);
+    expect(result.error).toBeNull();
+    expect(lead.insert.mock.calls[0][0]).toMatchObject({ contact_id: autoLeadContactId });
+    expect(result.data?.contactId).toBe(autoLeadContactId);
+  });
+  it('accepts the contact when reassigning a lead', async () => {
+    const contact = query({ data: { id: autoLeadContactId }, error: null });
+    const lead = query({ data: { id: dealId, contact_id: autoLeadContactId, updated_at: 'confirmed' }, error: null });
+    mocks.from.mockImplementation(table => table === 'contacts' ? contact : lead);
+    expect(await dealsService.update(dealId, { contactId: autoLeadContactId })).toEqual({ data: { id: dealId, contactId: autoLeadContactId, updatedAt: 'confirmed' }, error: null });
+    expect(lead.update).toHaveBeenCalledWith(expect.objectContaining({ contact_id: autoLeadContactId }));
+  });
+});
+
+describe('link ids that are filled but are not ids', () => {
+  // Leads and contacts carry a provisional id while the screen waits for the server.
+  const provisionalId = 'temp-1732540000000';
+  // The screen validator rejects this version; the database may still hold such a row.
+  const unknownVersionId = '00000000-0000-9000-8000-000000000001';
+  const newLead = (contact: string) => ({ boardId: contactId, title: 'New lead', status: contactId, items: [], contactId: contact }) as Parameters<typeof dealsService.create>[0];
+  const item = { productId: '', name: 'Fees', quantity: 1, price: 100 };
+  // Every builder method chains, and awaiting the builder yields the result.
+  function chain(result: unknown) {
+    const builder: Record<string, unknown> = { then: (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve) };
+    for (const method of ['insert', 'update', 'select', 'eq', 'single']) builder[method] = vi.fn(() => builder);
+    return builder as Record<'insert' | 'update' | 'select' | 'eq' | 'single', ReturnType<typeof vi.fn>>;
+  }
+  function leadTables(storedContact: string | null) {
+    const board = chain({ data: { id: contactId, organization_id: dealId }, error: null });
+    const lead = chain({ data: { id: dealId, contact_id: storedContact }, error: null });
+    const items = chain({ data: [], error: null });
+    mocks.from.mockImplementation(table => table === 'boards' ? board : table === 'deals' ? lead : items);
+    return lead;
+  }
+  beforeEach(() => { vi.clearAllMocks(); mocks.organization.mockResolvedValue('current-org'); vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('returns an error instead of creating a lead without its contact', async () => {
+    const result = await dealsService.create(newLead(provisionalId));
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toContain('identificar o contato');
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+  // Reassigning is older and stricter than creating: it also checks the id version. Left as it was.
+  it('still refuses that contact id version when reassigning a lead', async () => {
+    expect((await dealsService.update(dealId, { contactId: unknownVersionId })).error?.message).toContain('Contato inválido');
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it('still creates a lead with no contact when the field is empty', async () => {
+    const lead = leadTables(null);
+    expect((await dealsService.create(newLead(''))).error).toBeNull();
+    expect(lead.insert.mock.calls[0][0]).toMatchObject({ contact_id: null });
+  });
+  it('keeps a contact id of a version the screen validator does not know, leaving existence to the database', async () => {
+    const lead = leadTables(unknownVersionId);
+    const result = await dealsService.create(newLead(unknownVersionId));
+    expect(result.error).toBeNull();
+    expect(lead.insert.mock.calls[0][0]).toMatchObject({ contact_id: unknownVersionId });
+  });
+
+  it('returns an error instead of storing an item without its lead', async () => {
+    const result = await dealsService.addItem(provisionalId, item);
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toContain('identificar o lead');
+    expect(mocks.from).not.toHaveBeenCalled();
+    expect(mocks.organization).not.toHaveBeenCalled();
+  });
+  it.each([dealId, unknownVersionId])('stores the item under the lead it was given (%s)', async leadId => {
+    const stored = chain({ data: { id: 'item', product_id: null, name: 'Fees', quantity: 1, price: 100 }, error: null });
+    mocks.from.mockReturnValueOnce(stored).mockReturnValue(chain({ data: [], error: null }));
+    const result = await dealsService.addItem(leadId, item);
+    expect(result.error).toBeNull();
+    expect(result.data).toMatchObject({ id: 'item', name: 'Fees' });
+    expect(stored.insert).toHaveBeenCalledWith(expect.objectContaining({ deal_id: leadId, product_id: null, organization_id: 'current-org' }));
+  });
+
+  // "The database decides": the id is shaped like a UUID, the database says no, and that error comes back.
+  it('returns the database refusal and does not recalculate the lead value', async () => {
+    const denied = new Error('new row violates row-level security policy for table "deal_items"');
+    mocks.from.mockReturnValue(chain({ data: null, error: denied }));
+    const result = await dealsService.addItem(unknownVersionId, item);
+    expect(result).toEqual({ data: null, error: denied });
+    expect(mocks.from.mock.calls).toEqual([['deal_items']]);
+  });
+
+  it('returns an error instead of editing an item through a null lead filter', async () => {
+    const result = await dealsService.updateItem(provisionalId, 'item', { price: 50 });
+    expect(result.error?.message).toContain('identificar o lead');
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it('keeps an edit with nothing to change a no-op, whatever the lead id', async () => {
+    expect(await dealsService.updateItem(provisionalId, 'item', {})).toEqual({ error: null });
+    expect(mocks.from).not.toHaveBeenCalled();
+  });
+  it.each([dealId, unknownVersionId])('edits the item of the lead it was given (%s)', async leadId => {
+    const edited = chain({ error: null });
+    mocks.from.mockReturnValueOnce(edited).mockReturnValue(chain({ data: [], error: null }));
+    expect(await dealsService.updateItem(leadId, 'item', { price: 50 })).toEqual({ error: null });
+    expect(edited.update).toHaveBeenCalledWith({ price: 50 });
+    expect(edited.eq.mock.calls).toEqual([['id', 'item'], ['deal_id', leadId]]);
   });
 });
 

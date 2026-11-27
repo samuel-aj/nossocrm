@@ -113,6 +113,23 @@ describe('contrato com o AI SDK instalado', () => {
     expect(cancel).not.toHaveBeenCalled();
     expect(model.doGenerateCalls).toHaveLength(1);
   });
+  it('confirma o retorno reservado pela ferramenta sem repetir o combinado do modelo', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-24T20:00:00Z'));
+    try {
+      const booking = { local: '2026-11-25T09:00', timezone: 'America/Sao_Paulo', context: 'Retorno pedido pelo cliente', confirmed: true };
+      const schedule = vi.fn().mockResolvedValue({ ok: true, id: 'retorno', scheduledAt: '2026-11-25T12:00:00.000Z', timezone: booking.timezone });
+      const model = queuedModel([
+        response([{ type: 'tool-call', toolCallId: 'book', toolName: 'agendar_retorno', input: JSON.stringify(booking) }]),
+        text('Combinado, Fulano! Te chamo amanhã às 9h.'),
+      ]);
+      const result = await generateAgentReply({ ...input, model,
+        agent: { ...agent, tools: { ...agent.tools, scheduled_return_bot_id: 'robot' } },
+        runtime: { scheduledReturn: { schedule, inspect: vi.fn(), cancel: vi.fn() } } });
+      expect(schedule).toHaveBeenCalledExactlyOnceWith(booking);
+      expect(result.text).toBe('Combinado, Fulano!\nTe chamo amanhã (25/11) às 9h.');
+      expect(result.outputSafety).toMatchObject({ status: 'repaired', returnReplyAdjusted: true });
+    } finally { vi.useRealTimers(); }
+  });
   const savedAnnotation = '[salvar_dados]\n' + JSON.stringify({
     documentos_rescisao: 'aguardando',
     tempo_carteira: 'dois anos',

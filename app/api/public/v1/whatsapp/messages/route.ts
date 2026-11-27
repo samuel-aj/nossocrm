@@ -49,7 +49,7 @@ const BodySchema = z.object({
 
 export async function POST(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   let raw: unknown;
   try {

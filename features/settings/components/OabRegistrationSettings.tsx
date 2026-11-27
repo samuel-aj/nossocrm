@@ -10,7 +10,7 @@ import { SETTINGS_BTN_PRIMARY, SETTINGS_INPUT_CLASS } from './SettingsUi';
 
 const endpoint = '/api/org/oab';
 
-export function OabRegistrationSettings({ organizationId }: { organizationId: string }) {
+export function OabRegistrationSettings({ organizationId, active = true }: { organizationId: string; active?: boolean }) {
   const cache = useQueryClient();
   const { addToast } = useToast();
   const [professionalName, setName] = useState('');
@@ -21,6 +21,7 @@ export function OabRegistrationSettings({ organizationId }: { organizationId: st
   const headers = { 'Content-Type': 'application/json', 'x-org-id': organizationId };
   const registrations = useQuery<StoredOabRegistration[]>({
     queryKey,
+    enabled: active,
     queryFn: async () => {
       const response = await fetch(endpoint, { headers });
       const body = await response.json();
@@ -56,9 +57,7 @@ export function OabRegistrationSettings({ organizationId }: { organizationId: st
     void save('POST', { professionalName, state, number, confirmed: true });
   }
 
-  return <section className="border-t border-slate-100 dark:border-white/10 pt-4">
-    <h3 className="text-sm font-semibold">Inscrições da OAB</h3>
-    <p className="mt-1 text-xs text-slate-500">Confirme as inscrições que os agentes de IA podem informar aos clientes.</p>
+  return <>
     {registrations.error && <p role="alert" className="mt-2 text-sm text-red-600">{registrations.error.message}</p>}
     {registrations.isLoading && <p className="mt-2 text-sm text-slate-500">Carregando inscrições…</p>}
     {registrations.data?.length === 0 && <p className="mt-3 text-sm text-slate-500">Nenhuma inscrição confirmada.</p>}
@@ -90,5 +89,5 @@ export function OabRegistrationSettings({ organizationId }: { organizationId: st
         Confirmar inscrição
       </button>
     </form>
-  </section>;
+  </>;
 }

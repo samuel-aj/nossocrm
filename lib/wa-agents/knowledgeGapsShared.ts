@@ -153,7 +153,9 @@ const answerField = z
   .trim()
   .min(1, 'Escreva a resposta')
   .max(GAP_ANSWER_MAX, `A resposta pode ter até ${GAP_ANSWER_MAX} caracteres`);
+const revisionFields = { expected_updated_at: z.string().datetime({ offset: true }).optional() };
 const destinationFields = {
+  ...revisionFields,
   question: questionField,
   answer: answerField,
   document_id: z.string().uuid().optional(),
@@ -165,9 +167,9 @@ export const KnowledgeGapActionSchema = z
   .discriminatedUnion('action', [
     z.object({ action: z.literal('include'), ...destinationFields }),
     z.object({ action: z.literal('edit'), ...destinationFields }),
-    z.object({ action: z.literal('remove') }),
-    z.object({ action: z.literal('ignore') }),
-    z.object({ action: z.literal('reopen') }),
+    z.object({ action: z.literal('remove'), ...revisionFields }),
+    z.object({ action: z.literal('ignore'), ...revisionFields }),
+    z.object({ action: z.literal('reopen'), ...revisionFields }),
   ])
   .superRefine((value, ctx) => {
     if ((value.action === 'include' || value.action === 'edit') && !value.document_id === !value.create_document) {

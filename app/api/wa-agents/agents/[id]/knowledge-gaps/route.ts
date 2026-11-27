@@ -6,7 +6,7 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { listKnowledgeGaps } from '@/lib/wa-agents/knowledgeGaps';
 import { KNOWLEDGE_GAP_STATUSES, type KnowledgeGapStatus } from '@/lib/wa-agents/knowledgeGapsShared';
-import { agentBelongsToOrg, agentNotFoundError, getErrorMessage, guardRoute } from '../../../_shared';
+import { agentBelongsToOrg, agentNotFoundError, guardRoute } from '../../../_shared';
 
 export const runtime = 'nodejs';
 
@@ -24,6 +24,7 @@ export async function GET(req: Request, ctx: Ctx) {
     if (!(await agentBelongsToOrg(auth.admin, orgId, id))) return agentNotFoundError();
     return json(await listKnowledgeGaps(auth.admin, orgId, id, status as KnowledgeGapStatus));
   } catch (err) {
-    return json({ error: getErrorMessage(err, 'Falha ao listar as dúvidas') }, 500);
+    console.error('[wa-agents] consulta de dúvidas falhou', err);
+    return json({ error: 'Falha ao listar as dúvidas' }, 500);
   }
 }

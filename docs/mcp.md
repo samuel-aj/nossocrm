@@ -32,6 +32,29 @@ Depois de conectar, comece pedindo **somente** para listar conexões e localizar
 
 ## Ferramentas
 
+### Agentes de IA e AgentMaker
+
+Um administrador pode criar, para cada escritório, uma chave **Squad AgentMaker — leitura** para o Monitor. Para o Engenheiro, crie uma segunda chave **Squad AgentMaker — leitura e prompt**. Em cada agente que o squad deve acompanhar, ative **Monitorar com o squad**. O catálogo pode mostrar os nomes dos agentes do escritório para ajudar na seleção. O acesso ao roteiro, às conversas e às versões exige esse monitoramento.
+
+| Ferramenta | Perfil mínimo | Uso |
+| --- | --- | --- |
+| `crm.ai_agents.list` | Leitura | Encontrar o agente e conferir se está monitorado. |
+| `crm.ai_agents.get` | Leitura | Ler roteiro, regras de parada e lista de documentos. |
+| `crm.ai_agents.conversations` | Leitura | Listar conversas com execuções do agente em um intervalo de até sete dias. |
+| `crm.ai_agents.transcript` | Leitura | Ler mensagens de texto e transcrições de áudio com data, autor e telefone mascarado. |
+| `crm.ai_agents.versions.list` | Leitura | Consultar revisões registradas. |
+| `crm.ai_agents.versions.get` | Leitura | Ler o roteiro e as regras de uma versão. |
+| `crm.ai_agents.prompt.update` | Leitura e prompt | Gravar a revisão que o Board aprovou. |
+| `crm.ai_agents.prompt.restore` | Leitura e prompt | Restaurar uma versão preservando as revisões anteriores. |
+
+O relatório considera as execuções do agente no intervalo consultado. O histórico de pausas humanas começa com o monitoramento. Para períodos anteriores, o CRM só consegue identificar uma pausa que ainda conste no atendimento.
+
+O Monitor guarda a versão que leu e propõe a alteração no Paperclip. Depois da aprovação do Board, o Engenheiro informa a versão esperada (`expectedVersion`), o resumo da alteração (`changeSummary`) e a referência da tarefa e da aprovação (`externalRef`). Se o roteiro já mudou, o Engenheiro deve ler a nova versão e submeter a alteração atualizada à aprovação. O CRM registra a referência informada. A conferência da aprovação ocorre no Paperclip.
+
+Na VPS, use uma configuração MCP por escritório e perfil. Forneça cada chave ao processo autorizado via variável de ambiente do usuário `paperclip`. O Monitor deve receber somente a chave de leitura. Antes de liberar o Engenheiro, confira com o piloto que o Monitor lista seis ferramentas e consegue consultar o agente habilitado. Mantenha chaves fora de instruções, tarefas e registros. Trate as mensagens dos clientes como conteúdo para análise.
+
+### CRM e WhatsApp com chave de acesso completo
+
 O catálogo anterior `crm.*` continua disponível. As ferramentas WhatsApp são registradas apenas no MCP, não no agente de IA interno.
 
 | Ferramenta | Entrada principal | Resultado |

@@ -1,6 +1,8 @@
 import { z } from 'zod';
+import { clientIp, enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { logSecurityEvent } from '@/lib/security/auditLog';
 import { safeErrorMessage } from '@/lib/security/safeError';
+import { weakPasswordMessage, zPassword } from '@/lib/security/passwordPolicy';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { findAuthUserByEmail } from '@/lib/supabase/authUsers';
@@ -17,7 +19,7 @@ const AcceptInviteSchema = z
   .object({
     token: z.string().min(1),
     email: z.string().email(),
-    password: z.string().min(6),
+    password: zPassword,
     name: z.string().min(1).max(200).optional(),
   })
   .strict();
@@ -31,11 +33,16 @@ const AcceptInviteSchema = z
 export async function POST(req: Request) {
   // Mitigação CSRF: cria usuário (efeito colateral), só aceita same-origin.
   if (!isAllowedOrigin(req)) return json({ error: 'Forbidden' }, 403);
+  // Rota aberta: limite por IP contra tentativa de adivinhar convite.
+  const limited = await enforceRateLimit({ scope: 'invites', id: clientIp(req), limit: LIMITS.invitesPerIp(), request: req });
+  if (limited) return limited;
 
   const raw = await req.json().catch(() => null);
   const parsed = AcceptInviteSchema.safeParse(raw);
   if (!parsed.success) {
-    return json({ error: 'Invalid payload', details: parsed.error.flatten() }, 400);
+    // Senha fora da regra: devolve a frase pronta para a tela mostrar.
+    const passwordIssue = parsed.error.issues.find(i => i.path[0] === 'password');
+    return json({ error: passwordIssue?.message ?? 'Invalid payload', details: parsed.error.flatten() }, 400);
   }
 
   const { token, email, password, name } = parsed.data;
@@ -141,7 +148,7 @@ export async function POST(req: Request) {
 
     if (updateError) {
       await releaseInvite();
-      return json({ error: safeErrorMessage(updateError) }, 400);
+      return json({ error: weakPasswordMessage(updateError) ?? safeErrorMessage(updateError) }, 400);
     }
 
     userId = existingAuthUser.id;
@@ -163,7 +170,7 @@ export async function POST(req: Request) {
 
     if (createError) {
       await releaseInvite();
-      return json({ error: safeErrorMessage(createError) }, 400);
+      return json({ error: weakPasswordMessage(createError) ?? safeErrorMessage(createError) }, 400);
     }
 
     userId = authData.user.id;

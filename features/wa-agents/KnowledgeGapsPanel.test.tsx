@@ -15,6 +15,7 @@ const agentId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const gapId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const docId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const conversationId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const revision = '2026-11-27T15:03:00.123456+00:00';
 const clients: QueryClient[] = [];
 let gaps: KnowledgeGapRow[];
 let writes: Array<Record<string, unknown>>;
@@ -33,7 +34,7 @@ function gap(overrides: Partial<KnowledgeGapRow> = {}): KnowledgeGapRow {
     context: 'A base cita hotel 3 estrelas, sem o nome.', suggested_answer: 'Hotel 3 estrelas em Copacabana.', answer: null,
     document_id: null, suggested_document_id: docId, occurrences: 3, test_only: true, last_conversation_id: conversationId,
     first_seen_at: new Date(Date.now() - 3_600_000).toISOString(), last_seen_at: new Date(Date.now() - 120_000).toISOString(),
-    reviewed_by: null, reviewed_at: null, created_at: '', updated_at: '', ...overrides,
+    reviewed_by: null, reviewed_at: null, created_at: '', updated_at: revision, ...overrides,
   };
 }
 
@@ -107,7 +108,7 @@ describe('KnowledgeGapsPanel', () => {
     fireEvent.change(resposta, { target: { value: 'Hotel Mar Azul, em Copacabana.' } });
     fireEvent.click(screen.getByRole('button', { name: 'Incluir na base' }));
     await waitFor(() => expect(writes).toEqual([
-      { action: 'include', question: 'Qual o nome do hotel no pacote do Rio?', answer: 'Hotel Mar Azul, em Copacabana.', document_id: docId },
+      { action: 'include', expected_updated_at: revision, question: 'Qual o nome do hotel no pacote do Rio?', answer: 'Hotel Mar Azul, em Copacabana.', document_id: docId },
     ]));
     await waitFor(() => expect(toast).toHaveBeenCalledWith('Resposta incluída na base', 'success'));
   });
@@ -117,14 +118,14 @@ describe('KnowledgeGapsPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Responder' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Incluir na base' }));
     await waitFor(() => expect(writes).toEqual([
-      { action: 'include', question: 'Qual o nome do hotel no pacote do Rio?', answer: 'Hotel 3 estrelas em Copacabana.', create_document: true },
+      { action: 'include', expected_updated_at: revision, question: 'Qual o nome do hotel no pacote do Rio?', answer: 'Hotel 3 estrelas em Copacabana.', create_document: true },
     ]));
   });
 
   it('ignorar manda a ação e avisa', async () => {
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Ignorar' }));
-    await waitFor(() => expect(writes).toEqual([{ action: 'ignore' }]));
+    await waitFor(() => expect(writes).toEqual([{ action: 'ignore', expected_updated_at: revision }]));
     await waitFor(() => expect(toast).toHaveBeenCalledWith('Dúvida ignorada', 'success'));
   });
 });

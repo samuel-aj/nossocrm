@@ -1,4 +1,5 @@
 import { conversationAllowed } from '@/lib/permissions/conversationAccess';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { reportRejectedSend } from '@/lib/whatsapp/connectionSendFailure';
 /**
@@ -55,6 +56,8 @@ function fileNameFromPath(path: string): string {
 export async function POST(req: Request) {
   const auth = await requireOrgUser();
   if (!auth.ok) return auth.response;
+  const limited = await enforceRateLimit({ scope: 'whatsapp_send', id: auth.user.id, limit: LIMITS.whatsappSendPerUser(), request: req, actorId: auth.user.id, organizationId: auth.user.organizationId });
+  if (limited) return limited;
   const orgId = auth.user.organizationId;
 
   let body: { messageIds?: unknown; targets?: unknown };

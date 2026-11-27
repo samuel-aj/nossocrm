@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 // para preencher `custom_fields` ao criar um deal — sem hardcode por organização.
 export async function GET(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const url = new URL(request.url);
   const entityType = (url.searchParams.get('entity_type') || '').trim();

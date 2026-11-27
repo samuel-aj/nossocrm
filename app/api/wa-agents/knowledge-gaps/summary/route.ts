@@ -4,7 +4,7 @@
  */
 import { json } from '@/lib/whatsapp/api';
 import { openGapCountsByAgent } from '@/lib/wa-agents/knowledgeGaps';
-import { getErrorMessage, guardRoute } from '../../_shared';
+import { guardRoute } from '../../_shared';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +14,7 @@ export async function GET() {
   try {
     return json({ counts: await openGapCountsByAgent(auth.admin, auth.user.organizationId) });
   } catch (err) {
-    return json({ error: getErrorMessage(err, 'Falha ao contar as dúvidas') }, 500);
+    console.error('[wa-agents] contagem de dúvidas falhou', err);
+    return json({ error: 'Falha ao contar as dúvidas' }, 500);
   }
 }

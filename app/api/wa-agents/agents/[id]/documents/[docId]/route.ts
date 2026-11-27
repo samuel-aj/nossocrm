@@ -10,7 +10,7 @@ import { isValidUUID } from '@/lib/supabase/utils';
 import { DOCUMENT_COLUMNS, deleteDocumentChunks, loadDocument } from '@/lib/wa-agents/knowledge';
 import { reopenGapsForDocument } from '@/lib/wa-agents/learnedAnswers';
 import { AgentDocumentMetaSchema, type AgentDocumentRow } from '@/lib/wa-agents/types';
-import { getErrorMessage, guardRoute, readJsonBody, removeAgentFiles, validationError } from '../../../../_shared';
+import { guardRoute, readJsonBody, removeAgentFiles, validationError } from '../../../../_shared';
 
 export const runtime = 'nodejs';
 
@@ -79,7 +79,8 @@ export async function DELETE(req: Request, ctx: Ctx) {
     await reopenGapsForDocument(auth.admin, orgId, document.id);
     await deleteDocumentChunks(auth.admin, orgId, document.id);
   } catch (err) {
-    return json({ error: getErrorMessage(err, 'Falha ao apagar os trechos do documento') }, 500);
+    console.error('[wa-agents] erro ao apagar os trechos do documento', err);
+    return json({ error: 'Falha ao apagar os trechos do documento' }, 500);
   }
   const { error } = await auth.admin
     .from('wa_ai_agent_documents')

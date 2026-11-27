@@ -34,6 +34,7 @@ import {
   ListChecks,
   X,
   BookOpen,
+  Scale,
   Calculator,
   AlarmClock,
   KanbanSquare,
@@ -44,7 +45,10 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal';
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import { OabRegistrationSettings } from '@/features/settings/components/OabRegistrationSettings';
+import { UserRole } from '@/types/constants';
 import {
   AI_PROVIDERS,
   AGENT_VOICES,
@@ -133,6 +137,7 @@ type AgentFormState = {
   name: string;
   persona_name: string;
   enabled: boolean;
+  squad_monitoring: boolean;
   connection_ids: string[];
   provider: AiProvider;
   model: string;
@@ -227,6 +232,7 @@ const FIELD_TABS: Record<string, EditorTab> = {
   name: 'roteiro',
   persona_name: 'roteiro',
   enabled: 'roteiro',
+  squad_monitoring: 'roteiro',
   system_prompt: 'roteiro',
   stop_rules: 'roteiro',
   connection_ids: 'gatilhos',
@@ -282,6 +288,7 @@ function buildInitialForm(agent: AgentPublic | null, initial?: Partial<AgentInpu
     name: src.name ?? '',
     persona_name: src.persona_name ?? '',
     enabled: src.enabled ?? true,
+    squad_monitoring: agent?.squad_monitoring ?? false,
     connection_ids: src.connection_ids ?? [],
     provider,
     model: src.model ?? firstModel(provider),
@@ -323,6 +330,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
     name: form.name.trim(),
     persona_name: form.persona_name.trim() || null,
     enabled: form.enabled,
+    squad_monitoring: form.squad_monitoring,
     connection_ids: form.connection_ids,
     provider: form.provider,
     model: form.model.trim(),
@@ -374,6 +382,7 @@ function toPayload(form: AgentFormState): Partial<AgentInput> {
 
 const FIELD_NAMES: Record<string, string> = {
   name: 'Nome',
+  squad_monitoring: 'Monitorar com o squad',
   persona_name: 'Nome da persona',
   connection_ids: 'Números',
   provider: 'Provedor',
@@ -917,6 +926,7 @@ export const AgentEditor: React.FC<{
   onClose: () => void;
 }> = ({ agent, initial, onClose }) => {
   const { showToast } = useToast();
+  const { profile } = useAuth();
   const optionsQ = useWaAgentOptions();
   const agentsQ = useWaAgentsList();
   const botsQ = useWaBotsList();
@@ -1137,7 +1147,7 @@ export const AgentEditor: React.FC<{
   const disabledHelpers = helperCandidates.filter((a) => !a.enabled && !form.helper_agent_ids.includes(a.id)).map((a) => a.id);
   const knowledgeCount = (docsQ.data?.length ?? 0) + (mediaQ.data?.length ?? 0);
   const countBadge = (n: number) => (n > 0 ? <Badge tone="slate">{n}</Badge> : undefined);
-  const openGaps = gapsQ.data?.counts.open ?? 0;
+  const openGaps = gapsQ.data?.counts?.open ?? 0;
 
   // Variáveis, ações e mídias que existem de verdade: o roteiro e o "Quando encerrar"
   // destacam em âmbar o que estiver escrito como token mas não existir.
@@ -1242,6 +1252,15 @@ export const AgentEditor: React.FC<{
               />
             </Field>
           </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Monitorar com o squad</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Permite ao AgentMaker consultar as conversas deste agente. Uma chave com permissão de edição também pode atualizar o roteiro e as regras de encerramento.
+              </p>
+            </div>
+            <Toggle checked={form.squad_monitoring} onChange={squad_monitoring => patch({ squad_monitoring })} label="Monitorar com o squad" />
+          </div>
           {!form.enabled ? <Notice tone="amber">Desligado, o agente não responde e não pode ser iniciado.</Notice> : null}
         </Panel>
 
@@ -1292,15 +1311,24 @@ export const AgentEditor: React.FC<{
           onRequestSave={() => void handleSave()}
           saving={save.isPending}
           learnedByDocument={gapsQ.data?.learned_by_document}
-          gapsPanel={
-            <KnowledgeGapsPanel
-              agentId={agentId}
-              enabled={form.tools.knowledge_gaps === true}
-              documents={docsQ.data ?? []}
-              onOpenSettings={() => setTab('acoes')}
-            />
-          }
-        />
+        >
+          <KnowledgeGapsPanel
+            agentId={agentId}
+            enabled={form.tools.knowledge_gaps === true}
+            documents={docsQ.data ?? []}
+            onOpenSettings={() => setTab('acoes')}
+          />
+          {profile?.organization_id && (!agent || agent.organization_id === profile.organization_id) &&
+            (profile.role === UserRole.ADMIN || profile.role === UserRole.SUPER_ADMIN) && (
+              <Panel
+                title="Inscrições da OAB"
+                icon={<Scale size={16} />}
+                description="Ao confirmar uma inscrição, você autoriza todos os agentes deste escritório a informar esse número aos clientes."
+              >
+                <OabRegistrationSettings key={profile.organization_id} organizationId={profile.organization_id} active={tab === 'conhecimento'} />
+              </Panel>
+            )}
+        </KnowledgePanel>
       </TabPanel>
 
       {/* 3. Ações e recursos */}

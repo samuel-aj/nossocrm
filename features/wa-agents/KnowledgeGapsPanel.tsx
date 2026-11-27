@@ -288,7 +288,7 @@ export const KnowledgeGapsPanel: React.FC<{
   const run = async (gap: KnowledgeGapRow, action: KnowledgeGapAction, okMessage: string) => {
     setBusyId(gap.id);
     try {
-      await act.mutateAsync({ gapId: gap.id, action });
+      await act.mutateAsync({ gapId: gap.id, action: { ...action, expected_updated_at: gap.updated_at } });
       showToast(okMessage, 'success');
     } catch (err) {
       showToast(errorMessage(err, 'Não foi possível atualizar a dúvida'), 'error');
@@ -382,7 +382,7 @@ export const KnowledgeGapsPanel: React.FC<{
           pending={act.isPending}
           onClose={() => setEditing(null)}
           onSubmit={(action) => {
-            act.mutateAsync({ gapId: editing.gap.id, action }).then(
+            act.mutateAsync({ gapId: editing.gap.id, action: { ...action, expected_updated_at: editing.gap.updated_at } }).then(
               () => {
                 showToast(editing.mode === 'edit' ? 'Resposta salva' : 'Resposta incluída na base', 'success');
                 setEditing(null);

@@ -466,6 +466,11 @@ export function useKnowledgeGapAction(agentId: string | null | undefined) {
       });
       return json.gap;
     },
+    onError: (error) => {
+      if (error instanceof WaAgentsApiError && error.status === 409) {
+        void qc.invalidateQueries({ queryKey: gapsKey(agentId) });
+      }
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: gapsKey(agentId) });
       void qc.invalidateQueries({ queryKey: GAP_SUMMARY_KEY });

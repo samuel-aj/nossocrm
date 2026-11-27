@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 
 export async function GET(request: Request, ctx: { params: Promise<{ boardKeyOrId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { boardKeyOrId } = await ctx.params;
   const value = String(boardKeyOrId || '').trim();

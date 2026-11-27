@@ -10,6 +10,7 @@
  * Sem chave -> 400 { error, code: 'AI_KEY_NOT_CONFIGURED' }.
  */
 import { json } from '@/lib/whatsapp/api';
+import { enforceRateLimit, LIMITS } from '@/lib/security/rateLimit';
 import { safeErrorMessage } from '@/lib/security/safeError';
 import { assistAgentConfig } from '@/lib/wa-agents/assist';
 import { WaAgentError } from '@/lib/wa-agents/errors';
@@ -22,6 +23,8 @@ export const maxDuration = 120;
 export async function POST(req: Request) {
   const auth = await guardRoute({ req, admin: true, agents: true });
   if (!auth.ok) return auth.response;
+  const limited = await enforceRateLimit({ scope: 'ai', id: auth.user.id, limit: LIMITS.aiPerUser(), request: req, actorId: auth.user.id, organizationId: auth.user.organizationId });
+  if (limited) return limited;
 
   const parsed = AssistInputSchema.safeParse(await readJsonBody(req));
   if (!parsed.success) return validationError(parsed.error);

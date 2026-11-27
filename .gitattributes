@@ -1,0 +1,3 @@
+# Duas sessões publicam em paralelo e as duas acrescentam entradas no topo do
+# registro: na junção, o Git mantém as duas em vez de acusar conflito.
+CHANGELOG.md merge=union

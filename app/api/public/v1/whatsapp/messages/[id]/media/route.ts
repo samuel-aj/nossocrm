@@ -17,7 +17,7 @@ const EXPIRES = 600;
 
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { id } = await ctx.params;
   if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid message id', code: 'VALIDATION' }, { status: 400 });

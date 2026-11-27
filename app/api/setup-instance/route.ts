@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { safeErrorMessage } from '@/lib/security/safeError';
+import { weakPasswordMessage, zPassword } from '@/lib/security/passwordPolicy';
 import { createStaticAdminClient } from '@/lib/supabase/server';
 import { isAllowedOrigin } from '@/lib/security/sameOrigin';
 import { UserRole } from '@/types/constants';
@@ -15,7 +16,7 @@ const SetupSchema = z
   .object({
     companyName: z.string().min(1).max(200),
     email: z.string().email(),
-    password: z.string().min(6),
+    password: zPassword,
   })
   .strict();
 
@@ -32,7 +33,8 @@ export async function POST(req: Request) {
   const raw = await req.json().catch(() => null);
   const parsed = SetupSchema.safeParse(raw);
   if (!parsed.success) {
-    return json({ error: 'Invalid payload', details: parsed.error.flatten() }, 400);
+    const passwordIssue = parsed.error.issues.find(i => i.path[0] === 'password');
+    return json({ error: passwordIssue?.message ?? 'Invalid payload', details: parsed.error.flatten() }, 400);
   }
 
   const { companyName, email, password } = parsed.data;
@@ -65,7 +67,7 @@ export async function POST(req: Request) {
 
   if (userError) {
     await admin.from('organizations').delete().eq('id', organization.id);
-    return json({ error: safeErrorMessage(userError) }, 400);
+    return json({ error: weakPasswordMessage(userError) ?? safeErrorMessage(userError) }, 400);
   }
 
   const userId = userData.user.id;

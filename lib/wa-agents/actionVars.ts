@@ -58,6 +58,7 @@ export function buildActionSystemVars(input: {
   for (const [k, v] of Object.entries(ctx.deal?.custom_fields ?? {})) campos[k] = v;
   return {
     ...base,
+    dados: ctx.conversation.ai_state?.dados ?? {},
     email: ctx.contact?.email ?? '',
     empresa: ctx.contact?.company_name ?? '',
     resumo: summary,

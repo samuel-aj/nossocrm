@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { guardReturnPromises } from './agreedReturn';
 import { buildAgentTools } from './tools';
 import { scheduledReturnRuntime } from './scheduledReturns';
 import type { AgentRow } from './types';
@@ -8,6 +9,23 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-05'));
 afterEach(() => vi.useRealTimers());
 it('não oferece ações de retorno quando não configurado', () => {
   expect(buildAgentTools({ ...agent, tools: { calculator: false } }).agendar_retorno).toBeUndefined();
+});
+it('pede ao modelo uma confirmação curta, sem ano nem fuso', () => {
+  const runtime = scheduledReturnRuntime({ rpc: vi.fn() } as never, 'org', 'conv', agent, null);
+  const description = String(buildAgentTools(agent, { scheduledReturn: runtime }).agendar_retorno.description);
+  expect(description).toContain('sem ano nem fuso');
+  expect(description).toContain('que comece por "Te chamo"');
+  expect(description).toContain('sem pergunta no fim');
+  expect(description).not.toContain('repita a data e o fuso');
+});
+it('mantém a trava do ok=true e cita um exemplo que o sistema troca pela reserva real', () => {
+  const runtime = scheduledReturnRuntime({ rpc: vi.fn() } as never, 'org', 'conv', agent, null);
+  const description = String(buildAgentTools(agent, { scheduledReturn: runtime }).agendar_retorno.description);
+  expect(description).toContain('Só diga que está agendado se ok=true');
+  const example = /ex\.: "([^"]+)"/.exec(description)?.[1] ?? '';
+  const calls = [{ tool: 'agendar_retorno', input: {}, output: { ok: true, id: 'r', scheduledAt: '2026-11-25T12:00:00Z', timezone: 'America/Sao_Paulo' } }];
+  expect(guardReturnPromises([{ kind: 'text', text: example }], calls, true, [], '2026-11-24T20:00:00Z'))
+    .toEqual([{ kind: 'text', text: 'Combinado! Te chamo amanhã (25/11) às 9h.' }]);
 });
 it('grava somente RPC com contexto confiável, sem iniciar robô ou escolher outro destino', async () => {
   const rpc = vi.fn(async () => ({ data: 'return-id', error: null }));

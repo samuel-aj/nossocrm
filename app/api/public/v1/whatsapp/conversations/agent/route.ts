@@ -63,7 +63,7 @@ const ACTION_MAP: Record<(typeof ACTIONS)[number], ConversationAiAction> = {
 
 export async function POST(request: Request) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   let raw: unknown;
   try {

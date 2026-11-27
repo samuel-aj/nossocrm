@@ -251,6 +251,7 @@ export function normalizeAgentRow(raw: Record<string, unknown>): AgentRow {
     name: String(raw.name ?? ''),
     persona_name: (raw.persona_name as string | null) ?? null,
     enabled: raw.enabled !== false,
+    squad_monitoring: raw.squad_monitoring === true,
     connection_ids: Array.isArray(raw.connection_ids) ? (raw.connection_ids as string[]).map(String) : [],
     provider,
     model: String(raw.model ?? ''),
@@ -1083,6 +1084,10 @@ export function buildSystemPrompt(input: {
     lines.push('- Resultados possíveis do encerramento (use exatamente a chave):');
     for (const o of agent.outcomes) {
       lines.push(`  - ${o.key}: ${o.label}${o.description ? `. ${o.description}` : ''}`);
+      if (o.required_data?.length) {
+        const fields = o.required_data.map(field => `${field.key} (${field.label})`).join('; ');
+        lines.push(`    Antes de usar esse resultado, registre com salvar_dados as informações confirmadas nas chaves exatas: ${fields}. Use o histórico e os dados já salvos; não invente valores. Se faltar algum, pergunte apenas o que falta e mantenha a conversa aberta.`);
+      }
     }
     lines.push(
       '- Para encerrar o atendimento, chame a ferramenta encerrar_atendimento UMA única vez, na mesma resposta e DEPOIS de escrever a mensagem final para o cliente, com "resultado" igual a uma das chaves acima e "resumo" com o resumo objetivo do caso (quem, o quê, quando, onde, provas, urgência). Se nenhum resultado se aplicar, não encerre.'

@@ -11,10 +11,24 @@ import { beforeAll, afterAll, expect, it, vi } from 'vitest';
 import { memoryDb } from '@/test/helpers/mcpMemoryDb';
 import { sha256 } from '@/lib/mcp/whatsapp/uploads';
 
-const m = vi.hoisted(() => ({ admin: null as any, user: null as any, dispatches: [] as any[], files: new Map<string,Uint8Array>() }));
-vi.mock('@/lib/ai/tools', () => ({ createCRMTools: () => ({}) }));
-vi.mock('@/lib/public-api/auth', () => ({ authPublicApi: async (r: Request) => r.headers.get('x-api-key') === 'local-test-key'
-  ? {ok:true,organizationId:m.user.organizationId,apiKeyId:'test-key-id'} : {ok:false,status:401,body:{error:'Unauthorized'}} }));
+const m = vi.hoisted(() => ({ admin: null as any, user: null as any, agentsEnabled: true, dispatches: [] as any[], files: new Map<string,Uint8Array>() }));
+vi.mock('@/lib/wa-agents/beta', () => ({ isAiAgentsApproved: () => m.agentsEnabled }));
+vi.mock('@/lib/ai/tools', () => ({ createCRMTools: () => ({ createDeal: { execute: vi.fn() } }) }));
+vi.mock('@/lib/public-api/auth', () => ({
+  authPublicApi: async (request: Request, audience: string) => {
+    const key = request.headers.get('x-api-key') ?? '';
+    const scopes = new Map<string, string[] | null>([
+      ['local-test-key', null],
+      ['monitor', ['ai_agents:read']],
+      ['engineer', ['ai_agents:read', 'ai_agents:write_prompt']],
+      ['empty', []],
+      ['unknown-scope', ['crm.*']],
+    ]);
+    return audience === 'mcp' && scopes.has(key)
+      ? { ok: true, organizationId: m.user.organizationId, apiKeyId: 'test-key-id', scopes: scopes.get(key) }
+      : { ok: false, status: 401, body: { error: 'Unauthorized' } };
+  },
+}));
 vi.mock('@/lib/supabase/server', () => ({createStaticAdminClient: () => m.admin}));
 vi.mock('@/lib/mcp/whatsapp/access', async original => ({...await original<typeof import('@/lib/mcp/whatsapp/access')>(),resolveMcpOwner:async()=>m.user}));
 vi.mock('@/lib/permissions/server', () => ({getVisibilityRules:async()=>null,connectionAllowed:()=>true,filterConversationsByOwner:async(_a:unknown,_o:unknown,_r:unknown,_u:unknown,rows:unknown[])=>rows}));
@@ -50,6 +64,8 @@ beforeAll(async()=>{
     createSignedUrl:async(path:string)=>({data:{signedUrl:`https://storage.test/${path}`},error:null}),
     upload:async(path:string,bytes:Uint8Array)=>{m.files.set(path,bytes);return{error:null};},
   })},rpc:async(name:string,args:any)=>{
+    if (name === 'claim_wa_media_cooldown') return { data: { acquired: true }, error: null };
+    if (name === 'touch_wa_media_cooldown' || name === 'finish_wa_media_cooldown') return { data: true, error: null };
     const match=(r:any)=>r.organization_id===args.p_org&&r.api_key_id===args.p_key&&r.operation_id===args.p_operation;
     if(name==='mcp_wa_create_operation'){
       const existing=db.tables.mcp_wa_operations.find(match);
@@ -88,7 +104,10 @@ it('discovers and executes reads, PDF upload and ordered sends using the officia
   const client=new Client({name:'local-acceptance-test',version:'1.0.0'});
   await client.connect(new StreamableHTTPClientTransport(new URL(endpoint),{requestInit:{headers:{Authorization:'Bearer local-test-key'}}}));
   try{
-    expect((await client.listTools()).tools.map(t=>t.name)).toHaveLength(8);
+    const catalog = (await client.listTools()).tools.map(tool => tool.name);
+    expect(catalog.filter(name => name.startsWith('crm.whatsapp.'))).toHaveLength(8);
+    expect(catalog.filter(name => name.startsWith('crm.ai_agents.'))).toHaveLength(8);
+    expect(catalog).toContain('crm.deals.create');
     const call=async(name:string,args:Record<string,unknown>)=>{
       const result=await client.callTool({name:`crm.whatsapp.${name}`,arguments:args});
       expect(result.isError).toBe(false);return result.structuredContent as any;
@@ -121,6 +140,54 @@ it('discovers and executes reads, PDF upload and ordered sends using the officia
     const changed=await client.callTool({name:'crm.whatsapp.sequences.send',arguments:{...args,items:[{itemId:randomUUID(),type:'text',text:'changed'}]}});
     expect(changed.isError).toBe(true);expect(m.dispatches).toHaveLength(4);
   }finally{await client.close();}
+});
+
+it.each([
+  ['monitor', 6],
+  ['engineer', 8],
+  ['empty', 0],
+  ['unknown-scope', 0],
+] as const)('applies the same permissions to discovery and direct calls for %s', async (key, count) => {
+  const rpc = async (method: string, params: Record<string, unknown> = {}) => {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    });
+    return response.json();
+  };
+  const { result } = await rpc('tools/list');
+  const names: string[] = result.tools.map((tool: { name: string }) => tool.name);
+  expect(names).toHaveLength(count);
+  expect(names.every(name => name.startsWith('crm.ai_agents.'))).toBe(true);
+  expect(names.includes('crm.ai_agents.prompt.update')).toBe(key === 'engineer');
+  expect(names.includes('crm.ai_agents.prompt.restore')).toBe(key === 'engineer');
+  const forbidden = ['crm.whatsapp.sequences.send', 'crm.whatsapp.uploads.prepare', 'crm.deals.create'];
+  if (key !== 'engineer') forbidden.push('crm.ai_agents.prompt.update', 'crm.ai_agents.prompt.restore');
+  if (count === 0) forbidden.push('crm.ai_agents.list');
+  const before = m.dispatches.length;
+  for (const name of forbidden) {
+    expect(await rpc('tools/call', { name, arguments: {} })).toMatchObject({ error: { code: -32602 } });
+  }
+  expect(m.dispatches).toHaveLength(before);
+});
+
+it('hides agent tools when the module is disabled or the key owner loses admin access', async () => {
+  const call = async (method: string, params = {}) => (await fetch(endpoint, {
+    method: 'POST', headers: { 'content-type': 'application/json', Authorization: 'Bearer engineer' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })).json();
+  try {
+    for (const [enabled, role] of [[false, 'admin'], [true, 'member']] as const) {
+      m.agentsEnabled = enabled;
+      m.user.role = role;
+      expect((await call('tools/list')).result.tools).toEqual([]);
+      expect(await call('tools/call', { name: 'crm.ai_agents.list', arguments: {} })).toMatchObject({ error: { code: -32602 } });
+    }
+  } finally {
+    m.agentsEnabled = true;
+    m.user.role = 'admin';
+  }
 });
 
 it('rejects unauthorized, cross-origin, invalid version and notification dispatches',async()=>{

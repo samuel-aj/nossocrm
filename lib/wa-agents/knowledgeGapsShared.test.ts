@@ -73,6 +73,12 @@ describe('KnowledgeGapActionSchema', () => {
     expect(KnowledgeGapActionSchema.safeParse({ action: 'edit', ...answer, create_document: true }).success).toBe(true);
     expect(KnowledgeGapActionSchema.safeParse({ action: 'ignore' }).success).toBe(true);
   });
+  it('preserva os microssegundos da versão que apareceu na tela', () => {
+    const version = '2026-11-27T15:03:00.123456+00:00';
+    const payload = { action: 'remove', expected_updated_at: version };
+    expect(KnowledgeGapActionSchema.parse(payload)).toEqual(payload);
+    expect(KnowledgeGapActionSchema.safeParse({ ...payload, expected_updated_at: 'ontem' }).success).toBe(false);
+  });
   it('recusa destino ausente ou duplo, pergunta curta e ação desconhecida', () => {
     const missing = KnowledgeGapActionSchema.safeParse({ action: 'include', ...answer });
     expect(missing.success).toBe(false);

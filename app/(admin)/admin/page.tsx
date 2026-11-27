@@ -7,6 +7,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { UserRole } from '@/types/constants'
 import { pinTabOrg } from '@/lib/tabOrg'
+import { PASSWORD_HINT, PASSWORD_MIN_LENGTH } from '@/lib/security/passwordPolicy'
 import { SecurityEventsPanel } from '@/features/security/SecurityEventsPanel'
 import {
   Building2,
@@ -585,7 +586,8 @@ export default function AdminPage() {
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Senha Inicial</label>
                     <input
                       type="password"
-                      minLength={6}
+                      minLength={PASSWORD_MIN_LENGTH}
+                      title={PASSWORD_HINT}
                       value={formData.adminPassword}
                       onChange={e => setFormData(p => ({ ...p, adminPassword: e.target.value }))}
                       placeholder="Só pra conta nova"

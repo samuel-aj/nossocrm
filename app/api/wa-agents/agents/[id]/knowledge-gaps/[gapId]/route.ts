@@ -8,7 +8,7 @@ import { json } from '@/lib/whatsapp/api';
 import { isValidUUID } from '@/lib/supabase/utils';
 import { applyKnowledgeGapAction, deleteKnowledgeGap, KnowledgeGapError } from '@/lib/wa-agents/knowledgeGaps';
 import { KnowledgeGapActionSchema } from '@/lib/wa-agents/knowledgeGapsShared';
-import { agentBelongsToOrg, agentNotFoundError, getErrorMessage, guardRoute, readJsonBody, validationError } from '../../../../_shared';
+import { agentBelongsToOrg, agentNotFoundError, guardRoute, readJsonBody, validationError } from '../../../../_shared';
 
 export const runtime = 'nodejs';
 /** Criar o documento "Respostas aprendidas" processa o arquivo na mesma chamada. */
@@ -18,7 +18,8 @@ type Ctx = { params: Promise<{ id: string; gapId: string }> };
 
 function failure(err: unknown, fallback: string): Response {
   if (err instanceof KnowledgeGapError) return json({ error: err.message, code: err.code }, err.status);
-  return json({ error: getErrorMessage(err, fallback) }, 500);
+  console.error('[wa-agents] revisão de dúvida falhou', err);
+  return json({ error: fallback }, 500);
 }
 
 export async function PATCH(req: Request, ctx: Ctx) {

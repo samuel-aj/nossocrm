@@ -31,10 +31,14 @@ import { OrganizationId, ClientCompanyId } from '@/types';
 import { supabase } from './client';
 
 /**
- * Expressão regular para validação de UUID v4.
+ * Expressão regular para validação de UUID (RFC 9562, versões 1 a 8).
+ *
+ * O banco gera v4, mas o lead automático do WhatsApp cria contatos e negócios
+ * com id determinístico versão 8 (lib/wa-agents/autoLead.ts). Restringir a
+ * versão aqui faz o próprio CRM recusar registros que existem no banco.
  * @constant
  */
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Verifica se um valor é um UUID válido.
@@ -60,7 +64,8 @@ export function isValidUUID(value: unknown): value is string {
  * 
  * Use para TODOS os campos FK opcionais. Previne erros de
  * constraint violation quando o usuário não preenche um campo.
- * 
+ * Exceção: vínculo que não pode sumir em silêncio (negócio, contato) usa `readLinkId`.
+ *
  * @param value - UUID a ser sanitizado.
  * @returns UUID válido ou null.
  * 
@@ -133,6 +138,62 @@ export function requireUUID(value: string | undefined | null, fieldName: string)
     throw new Error(`${fieldName} é obrigatório e deve ser um UUID válido`);
   }
   return sanitized;
+}
+
+/**
+ * Formato em que o banco devolve uma coluna uuid: 8-4-4-4-12 em hexadecimal.
+ * Não olha versão nem variante, de propósito (ver `readLinkId`).
+ * @constant
+ */
+const UUID_SHAPE_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Resultado de `readLinkId`: o id pronto para gravar (null quando não há vínculo) ou a recusa. */
+export type LinkIdResult = { ok: true; id: string | null } | { ok: false };
+
+/**
+ * Textos de tela para a recusa de `readLinkId`. Vários chamadores mostram a
+ * mensagem do serviço como veio, e o caso real é o registro ainda sendo salvo.
+ */
+export const UNREADABLE_DEAL_MESSAGE = 'Não foi possível identificar o lead. Aguarde alguns segundos e tente novamente.';
+export const UNREADABLE_CONTACT_MESSAGE = 'Não foi possível identificar o contato. Aguarde alguns segundos e tente novamente.';
+
+/**
+ * Lê o id de um vínculo (negócio, contato) que vai ser gravado.
+ *
+ * - vazio ('', só espaços, null, undefined): sem vínculo, `id: null`;
+ * - texto com formato de UUID: segue como veio, e quem diz se o registro existe é o banco;
+ * - qualquer outra coisa (id provisório `temp-...`, marcador, texto solto): recusado.
+ *
+ * Use no lugar de `sanitizeUUID` quando trocar um valor preenchido por null
+ * gravaria o registro sem o vínculo, em silêncio. A versão do UUID não é
+ * conferida: um id que veio do banco nunca pode ser recusado pela tela.
+ * A recusa deixa um aviso no console, porque nem todo chamador olha o erro.
+ *
+ * Onde não serve:
+ * - gravação com chave de serviço (rotas, API pública): sem as regras de acesso
+ *   do usuário, "o banco decide" não protege o registro de outra organização;
+ * - id obrigatório: vazio devolve `id: null`, e quem recusa o null é o banco.
+ *
+ * @param value - Id do vínculo, como veio do chamador.
+ * @returns `{ ok: true, id }` para gravar ou `{ ok: false }` para devolver erro.
+ *
+ * @example
+ * ```typescript
+ * const deal = readLinkId(activity.dealId);
+ * if (!deal.ok) return { data: null, error: new Error(UNREADABLE_DEAL_MESSAGE) };
+ * insert({ deal_id: deal.id });
+ * ```
+ */
+export function readLinkId(value: unknown): LinkIdResult {
+  if (value === undefined || value === null) return { ok: true, id: null };
+  if (typeof value === 'string') {
+    if (value.trim() === '') return { ok: true, id: null };
+    if (UUID_SHAPE_REGEX.test(value)) return { ok: true, id: value };
+  }
+  // Só texto vai para o aviso: converter um valor qualquer pode lançar.
+  const shown = typeof value === 'string' ? `"${value}"` : typeof value;
+  console.warn(`[readLinkId] id de vínculo recusado: ${shown}`);
+  return { ok: false };
 }
 
 /**

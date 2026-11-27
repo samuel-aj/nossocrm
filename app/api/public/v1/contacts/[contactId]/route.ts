@@ -47,7 +47,7 @@ function toIsoTimestamp(v: string | undefined | null) {
 
 export async function GET(request: Request, ctx: { params: Promise<{ contactId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { contactId } = await ctx.params;
   if (!isValidUUID(contactId)) {
@@ -71,7 +71,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ contactId: 
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ contactId: string }> }) {
   const auth = await authPublicApi(request);
-  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });
+  if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status, headers: auth.headers });
 
   const { contactId } = await ctx.params;
   if (!isValidUUID(contactId)) {

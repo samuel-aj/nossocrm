@@ -64,6 +64,13 @@ describe('PATCH /knowledge-gaps/[gapId]', () => {
     expect(h.apply).toHaveBeenCalledWith({}, { organizationId: 'org', agentId, gapId, userId: 'admin-user', action: include });
   });
 
+  it('devolve apenas a mensagem pública quando a revisão falha internamente', async () => {
+    h.apply.mockRejectedValue(new Error('detalhe interno da persistência'));
+    const res = await patch(include);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Falha ao atualizar a dúvida' });
+  });
+
   it('transforma o erro da regra em status e mensagem', async () => {
     h.apply.mockRejectedValue(new KnowledgeGapError('DOCUMENT_NOT_READY', 'O documento está sendo processado. Tente de novo em instantes.', 409));
     const res = await patch(include);
