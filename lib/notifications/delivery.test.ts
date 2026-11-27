@@ -8,6 +8,46 @@ beforeEach(()=>{
 });
 it('deduplicates racing tabs and repeated overlapping polls',async()=>{const callback=vi.fn();await Promise.all([presentOnce('org:user','1',callback),presentOnce('org:user','1',callback)]);await presentOnce('org:user','1',callback);expect(callback).toHaveBeenCalledTimes(1);});
 it('keeps users and organizations independent',async()=>{const callback=vi.fn();await presentOnce('org:user','1',callback);await presentOnce('org:other','1',callback);await presentOnce('other:user','1',callback);expect(callback).toHaveBeenCalledTimes(3);});
+it('releases a silent background claim so a later visible tab can show the incident once', async () => {
+  const silent = { ...DEFAULT_PREFERENCES, sound: false, desktop: false };
+  const notice = { id:'incident', kind:'alert' as const, title:'Teste', message:'', href:'/chats', createdAt:'2026-11-27T12:00:00Z' };
+  expect(await presentOnce('org:user', notice.id, () => deliverNotice(notice, silent, vi.fn()))).toBe('skipped');
+  const showToast = vi.fn(() => true);
+  expect(await presentOnce('org:user', notice.id, showToast)).toBe('presented');
+  expect(await presentOnce('org:user', notice.id, showToast)).toBe('duplicate');
+  expect(showToast).toHaveBeenCalledTimes(1);
+});
+it('returns a duplicate result after a remount while the notice could still be fresh',async()=>{
+  const callback=vi.fn();
+  const clock=vi.spyOn(Date,'now').mockReturnValue(10_000);
+  try {
+    expect(await presentOnce('org:user','incident',callback)).toBe('presented');
+    clock.mockReturnValue(130_000);
+    await presentOnce('org:user','another-notice',vi.fn());
+    expect(await presentOnce('org:user','incident',callback)).toBe('duplicate');
+    expect(callback).toHaveBeenCalledTimes(1);
+  } finally { clock.mockRestore(); }
+});
+it('does not deliver sound or desktop alerts without cross-tab locks',async()=>{
+  Object.defineProperty(navigator,'locks',{configurable:true,value:undefined});
+  const callback=vi.fn();
+  expect(await presentOnce('org:user','incident',callback)).toBe('unavailable');
+  expect(callback).not.toHaveBeenCalled();
+});
+it('distinguishes unavailable storage from a duplicate for the local toast fallback',async()=>{
+  const callback=vi.fn();
+  const write=vi.spyOn(localStorage,'setItem').mockImplementation(()=>{throw new Error('Storage disabled');});
+  try {
+    expect(await presentOnce('org:user','incident',callback)).toBe('unavailable');
+    expect(callback).not.toHaveBeenCalled();
+  } finally { write.mockRestore(); }
+});
+it('does not classify a delivery failure as unavailable storage or retry the delivery',async()=>{
+  const callback=vi.fn(()=>{throw new Error('Audio unavailable');});
+  await expect(presentOnce('org:user','incident',callback)).rejects.toThrow('Audio unavailable');
+  expect(JSON.parse(localStorage.getItem('crm-notices:v1:org:user')!)).toHaveProperty('incident');
+  expect(callback).toHaveBeenCalledTimes(1);
+});
 it('does not request desktop permission while receiving an event',()=>{const requestPermission=vi.fn();vi.stubGlobal('Notification',Object.assign(vi.fn(),{permission:'default',requestPermission}));deliverNotice({id:'1',kind:'message',title:'Test',message:'Test',href:'/chats',createdAt:new Date().toISOString()},{...DEFAULT_PREFERENCES,desktop:true},vi.fn());expect(requestPermission).not.toHaveBeenCalled();vi.unstubAllGlobals();});
 
 it('uses distinct, bounded sound envelopes and skips oscillator creation at zero volume',async()=>{

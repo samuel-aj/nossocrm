@@ -8,7 +8,7 @@ import type {Notice,NotificationFeed,NotificationSettings,Preferences} from '@/l
 import { clearReadNotices, isOngoingNotice, reconcileUsageNotices } from '@/lib/notifications/history';
 import { receivesDevicePush } from '@/lib/notifications/pushDevice';
 import { startNotificationPolling } from '@/lib/notifications/polling';
-import { NOTIFICATION_FRESH_MS } from '@/lib/notifications/feedWindow';
+import { isFreshNotice } from '@/lib/notifications/feedWindow';
 
 async function api<T>(url:string,init?:RequestInit):Promise<T> {
   // Bound each HTTP request, not the whole batch: delivery may legitimately
@@ -77,13 +77,24 @@ export function usePersonalNotifications() {
               const ongoing=[notice,...items].filter(isOngoingNotice);
               return {scope,items:[...ongoing,...ordinary]};
             });
-            // Recover history after suspension without a burst of old sounds/banners.
-            if(!isOngoingNotice(notice) && Date.parse(notice.createdAt)<Date.parse(data.serverTime)-NOTIFICATION_FRESH_MS) continue;
+            // Recover history without presenting an old incident as a new interruption.
+            if(!isFreshNotice(notice.createdAt,data.serverTime)) continue;
             // Keep it in the bell, but let this device's push deliver the sound/banner just once.
             if(notice.kind==='message' && user && organizationId && await receivesDevicePush({userId:user.id,organizationId})) continue;
             if(stopped || signal.aborted) return;
-            if(document.visibilityState==='visible') setToast({scope,notice});
-            await presentOnce(scope,notice.id,()=>{if(!stopped && !signal.aborted) deliverNotice(notice,preferences,href=>router.push(href));});
+            const showToast=()=>{
+              if(stopped || signal.aborted || document.visibilityState!=='visible') return false;
+              setToast({scope,notice});
+              return true;
+            };
+            const presentation=await presentOnce(scope,notice.id,()=>{
+              if(stopped || signal.aborted) return false;
+              const shown = showToast();
+              const delivered = deliverNotice(notice,preferences,href=>router.push(href));
+              return shown || delivered;
+            });
+            // Without cross-tab coordination, retain the local toast but no sound/banner.
+            if(presentation==='unavailable') showToast();
           }
         } while(after && !stopped && !signal.aborted);
         if(stopped || signal.aborted) return;
