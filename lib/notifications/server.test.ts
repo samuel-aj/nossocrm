@@ -1,4 +1,4 @@
-import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 vi.mock('server-only',()=>({}));
 vi.mock('./connectionIncidents',()=>({connectionIncidentNotices:vi.fn(async()=>[])}));
 vi.mock('@/lib/ai-usage/notifications',()=>({usageNotices:vi.fn()}));
@@ -21,10 +21,11 @@ import {connectionIncidentNotices} from './connectionIncidents';
 
 const org='org-a',user='user-a';
 let tables:Record<string,Record<string,unknown>[]>;
-const queries:Array<{table:string;filters:Array<[string,unknown]>}>=[];
+const queries:Array<{table:string;filters:Array<[string,unknown]>;ranges:Array<[string,string,unknown]>}>=[];
 function from(table:string) {
-  const filters:Array<[string,unknown]>=[];queries.push({table,filters});
-  const q={select:()=>q,eq:(k:string,v:unknown)=>{filters.push([k,v]);return q;},is:()=>q,in:(k:string,v:unknown)=>{filters.push([k,v]);return q;},gte:()=>q,lte:()=>q,gt:()=>q,order:()=>q,limit:()=>q,
+  const filters:Array<[string,unknown]>=[],ranges:Array<[string,string,unknown]>=[];queries.push({table,filters,ranges});
+  const q={select:()=>q,eq:(k:string,v:unknown)=>{filters.push([k,v]);return q;},is:()=>q,in:(k:string,v:unknown)=>{filters.push([k,v]);return q;},
+    gte:(k:string,v:unknown)=>{ranges.push(['gte',k,v]);return q;},lte:(k:string,v:unknown)=>{ranges.push(['lte',k,v]);return q;},gt:(k:string,v:unknown)=>{ranges.push(['gt',k,v]);return q;},order:()=>q,limit:()=>q,
     maybeSingle:()=>Promise.resolve({data:tables[table]?.[0] ?? null,error:null}),
     upsert:vi.fn().mockResolvedValue({error:null}),
     then:(resolve:(r:unknown)=>unknown)=>Promise.resolve({data:tables[table] ?? [],error:null}).then(resolve)};
@@ -63,6 +64,60 @@ beforeEach(()=>{
   vi.mocked(getTeamAccess).mockResolvedValue({fullAccess:true,canManage:false,legacy:true,masterUserId:null,boards:[]});
   vi.mocked(getVisibilityRules).mockResolvedValue(null);
   tables={boards:[{id:'b',name:'Vendas'}],crm_notification_preferences:[{preferences:{...DEFAULT_PREFERENCES,messages:true,scope:'all',leads:true,boardIds:['11111111-1111-4111-8111-111111111111']}}],crm_notification_events:[{id:1,kind:'message',source_id:'m',created_at:now()}],wa_messages:[{id:'m',conversation_id:'c'}],wa_conversations:[{id:'c',contact_id:'contact',connection_id:'connection',wa_name:'Cliente',label_ids:[]}],deals:[{id:'d',title:'Lead',board_id:'b',owner_id:user,contact_id:'contact',is_won:false,is_lost:false}]};
+});
+
+describe('bounded recovery after a suspended notification poll',()=>{
+  const current='2026-11-27T16:00:00.000Z';
+  const journalQueries=()=>queries.filter(query=>query.table==='crm_notification_events');
+  beforeEach(()=>{vi.useFakeTimers();vi.setSystemTime(current);});
+  afterEach(()=>{vi.useRealTimers();});
+
+  it('recovers from the last successful cursor after a five-minute interruption',async()=>{
+    const since='2026-11-27T15:55:00.000Z';
+    tables.crm_notification_events[0].created_at='2026-11-27T15:56:00.000Z';
+    const result=await feed(auth,since,null,null);
+    expect(result.events).toMatchObject([{id:'1',kind:'message'}]);
+    expect(journalQueries()[0].ranges).toEqual([
+      ['gte','created_at',since],['lte','created_at',current],
+    ]);
+    expect(journalQueries()[0].filters).toContainEqual(['organization_id',org]);
+  });
+
+  it('bounds a stale cursor to the previous 24 hours',async()=>{
+    await feed(auth,'2026-11-20T16:00:00.000Z',null,null);
+    expect(journalQueries()[0].ranges).toEqual([
+      ['gte','created_at','2026-11-26T16:00:00.000Z'],['lte','created_at',current],
+    ]);
+  });
+
+  it('keeps the same recovery window on later pages while the clock advances',async()=>{
+    const since='2026-11-20T16:00:00.000Z';
+    tables.crm_notification_events=Array.from({length:200},(_,i)=>({id:i+1,kind:'message',source_id:'m',created_at:current}));
+    const first=await feed(auth,since,null,null);
+    expect(first.nextAfter).toBe('200');
+    vi.setSystemTime('2026-11-27T16:05:00.000Z');
+    tables.crm_notification_events=[{id:201,kind:'message',source_id:'m',created_at:current}];
+    const second=await feed(auth,since,first.nextAfter,first.serverTime);
+    expect(second.serverTime).toBe(current);
+    expect(second.nextAfter).toBeNull();
+    expect(journalQueries()[1].ranges).toEqual([
+      ...journalQueries()[0].ranges,['gt','id','200'],
+    ]);
+    expect(journalQueries().every(query=>query.filters.some(([key,value])=>key==='organization_id' && value===org))).toBe(true);
+  });
+
+  it('still starts a new session with only offline alerts instead of replaying messages',async()=>{
+    tables.crm_notification_events=[
+      {id:1,kind:'message',source_id:'m',created_at:current},
+      {id:2,kind:'human_handoff',source_id:'c',created_at:current},
+    ];
+    const result=await feed(auth,null,null,null);
+    expect(result.events).toMatchObject([{id:'2',kind:'alert',title:'Análise humana'}]);
+    expect(journalQueries()[0].ranges).toEqual([
+      ['gte','created_at','2026-11-26T16:00:00.000Z'],['lte','created_at',current],
+    ]);
+    expect(journalQueries()[0].filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery']]);
+  });
 });
 
 describe('WhatsApp entry recovery alerts',()=>{

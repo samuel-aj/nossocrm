@@ -28,6 +28,13 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Menos consultas automáticas do sino
+- **Tipo:** Correção
+- **O que mudou:** o sino consulta novos avisos a cada minuto e atualiza ao abrir ou voltar para o CRM, com proteção contra consultas seguidas. As preferências deixam de ser consultadas continuamente. Sem internet as consultas param, e falhas repetidas aumentam o intervalo entre tentativas. Ao voltar, o sino recupera até 24 horas desde a última consulta concluída, sem repetir sons de avisos antigos.
+- **Por quê:** o ciclo anterior consultava o servidor a cada quatro segundos por aba e elevava o consumo de infraestrutura mesmo sem novidades.
+- **Quem:** solicitado por Samuel e implementado por Codex.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-sino-consumo` (criar na publicação).
 ### 27/11/2026 · Dúvidas sem resposta na base de conhecimento do agente
 - **Tipo:** Novo
 - **O que mudou:** em Recursos, o administrador pode ativar “Aprender com dúvidas sem resposta” para cada agente. Na aba Conhecimento, ele revisa as dúvidas registradas e escolhe quais respostas incluir na base. Perguntas registradas apenas no simulador recebem a etiqueta “Só no teste”.

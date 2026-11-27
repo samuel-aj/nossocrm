@@ -7,6 +7,7 @@ import { usageNotices } from '@/lib/ai-usage/notifications';
 import { connectionIncidentNotices } from './connectionIncidents';
 import { entryRecoveryNotices } from './entryRecovery';
 import { hasFullOperationalAccess } from '@/lib/permissions/teamRoles';
+import { NOTIFICATION_CATCHUP_MS } from './feedWindow';
 
 const OFFLINE_ALERT_KINDS = ['human_handoff', 'wa_entry_recovery'];
 
@@ -55,7 +56,7 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   if (!p.messages && !p.leads && !p.alerts) return {events:lineNotices,serverTime:upper,nextAfter:null,connectionNoticesUnavailable};
   // A usage block remains actionable after an offline interval. Load unresolved
   // notices on boot and each first page; stable IDs use the existing client dedupe.
-  // Ordinary message/lead notifications retain their baseline and short window.
+  // Ordinary message/lead notifications retain their baseline across offline periods.
   let budgetNotices: Notice[] = [];
   let usageNoticesUnavailable = false;
   if (p.alerts && !after) {
@@ -64,7 +65,8 @@ export async function feed(auth: Auth, since: string | null, after: string | nul
   }
   // On opening the CRM, recover recent requests for human attention.
   if (!since && !p.alerts) return {events:[...lineNotices,...budgetNotices],serverTime:upper,nextAfter:null,usageNoticesUnavailable,connectionNoticesUnavailable};
-  const lower = new Date(since ? Math.max(Date.parse(since),Date.now()-120_000) : Date.now()-86_400_000).toISOString();
+  // Anchor the recovery window to this batch, not the wall clock on each page.
+  const lower = new Date(since ? Math.max(Date.parse(since),Date.parse(upper)-NOTIFICATION_CATCHUP_MS) : Date.parse(upper)-NOTIFICATION_CATCHUP_MS).toISOString();
   let query = auth.admin.from('crm_notification_events').select('id,kind,source_id,board_id,created_at')
     .eq('organization_id',auth.user.organizationId).gte('created_at',lower).lte('created_at',upper).order('id').limit(200);
   if (after) query=query.gt('id',after);

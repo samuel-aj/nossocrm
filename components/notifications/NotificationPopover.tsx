@@ -135,7 +135,7 @@ export const NotificationPopover = () => {
         <div className="relative" ref={popoverRef}>
             <button
                 type="button"
-                onClick={() => (isOpen ? closePanel() : setIsOpen(true))}
+                onClick={() => { if(isOpen) closePanel(); else { setIsOpen(true); personal.refresh(); } }}
                 aria-expanded={isOpen}
                 aria-label={`Notificações: ${count + personal.notices.length} novas`}
                 className="p-2 max-md:p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 rounded-full relative transition-colors focus-visible-ring"
