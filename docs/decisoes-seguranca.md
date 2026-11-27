@@ -300,3 +300,9 @@ Regras do registro:
 - **Solicitado por / quando:** implementação solicitada por Samuel em 26/11/2026.
 - **Onde fica:** autenticação da API pública, registro de ferramentas em `app/api/mcp`, ferramentas em `lib/mcp/aiAgents` e histórico protegido no Postgres.
 - **Se remover:** integrações podem receber acesso além do autorizado e alterações concorrentes de roteiro podem sobrescrever a revisão anterior.
+
+### DS-35 · Operador de leitura do Monitor
+- **Regra:** só a sessão de um superadmin global gerencia as chaves de operador. Cada chave tem segredo aleatório exibido uma vez, armazenamento por hash e revogação consultada no servidor. O MCP usa um catálogo fechado de seis leituras. A credencial não é reconhecida como chave de escritório pela API pública.
+- **Dados:** a listagem entre escritórios expõe apenas a identificação da organização e do agente e o estado do monitoramento. As consultas de conteúdo exigem autorização atual da organização e do agente em cada página. A transcrição verifica vínculo e atribuição. Leituras de roteiro não criam revisões.
+- **Auditoria:** os acessos são registrados no banco antes de devolver os dados, por ferramenta e organização efetivamente lida. As tabelas e funções do operador não estão disponíveis para usuários de clientes nem para sessões anônimas.
+- **Onde fica:** [gestão e uso da chave](operador-aj-mcp.md), `app/api/superadmin/operator-keys`, `lib/mcp/operator` e a migração `20261127203007_aj_operator_keys.sql`.

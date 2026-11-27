@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Uma chave de operador para o Monitor da AJ
+- **Tipo:** Novo
+- **O que mudou:** o superadmin pode criar e revogar a chave de leitura usada pelo Monitor para acompanhar os agentes autorizados de vários escritórios. O painel mostra o último uso e o CRM registra qual escritório foi consultado.
+- **Por quê:** o Monitor precisava de uma conexão separada para cada escritório.
+- **Quem:** solicitado por Samuel e implementado por Codex.
+- **Banco:** `20261127203007_aj_operator_keys.sql`. Reversão em `docs/aj-operator-keys-rollback.sql`.
+- **Para voltar:** `prod-pre-operador-aj-mcp` (criar na publicação).
+
 ### 27/11/2026 · Confirmações curtas preservam o retorno combinado
 - **Tipo:** Correção
 - **O que mudou:** o robô mantém o horário combinado quando o cliente responde “blz”, agradece, envia um emoji ou deixa dúvida sobre o que deseja. Uma remarcação confirmada substitui a reserva anterior. Um pedido claro de cancelamento encerra o retorno.

@@ -26,7 +26,7 @@ export async function getAuthedAdmin(): Promise<ApiKeysAuth> {
 }
 
 /** Mesmo formato da função create_api_key do banco: ncrm_ + 24 bytes em base64url, prefixo de 12, sha256 hex. */
-export function makeApiKeyToken(): { token: string; prefix: string; hash: string } {
-  const token = `ncrm_${randomBytes(24).toString('base64url')}`;
+export function makeApiKeyToken(namespace: 'ncrm_' | 'ncrmop_' = 'ncrm_'): { token: string; prefix: string; hash: string } {
+  const token = `${namespace}${randomBytes(24).toString('base64url')}`;
   return { token, prefix: token.slice(0, 12), hash: createHash('sha256').update(token).digest('hex') };
 }

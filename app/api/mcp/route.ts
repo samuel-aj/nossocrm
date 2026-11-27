@@ -8,6 +8,8 @@ import { addWhatsAppTools } from '@/lib/mcp/whatsapp/tools';
 import { addAiAgentTools } from '@/lib/mcp/aiAgents/tools';
 import { isOrgAdmin } from '@/lib/whatsapp/api';
 import { isAiAgentsApproved } from '@/lib/wa-agents/beta';
+import { authenticateOperator } from '@/lib/mcp/operator/auth';
+import { operatorRegistry } from '@/lib/mcp/operator/registry';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -42,13 +44,15 @@ function getApiKeyFromHeaders(request: Request) {
 async function authMcp(request: Request) {
   const apiKey = getApiKeyFromHeaders(request);
   if (!apiKey) return { ok: false as const, status: 401, body: { error: 'Missing API key', code: 'AUTH_MISSING' } };
+  if (apiKey.startsWith('ncrmop_')) return authenticateOperator(request, apiKey);
 
   // `authPublicApi` expects X-Api-Key. Most MCP clients use Authorization: Bearer, so we normalize here.
   const headers = new Headers(request.headers);
   headers.set('x-api-key', apiKey);
   const normalized = new Request(request.url, { method: request.method, headers });
 
-  return await authPublicApi(normalized, 'mcp');
+  const auth = await authPublicApi(normalized, 'mcp');
+  return auth.ok ? { ...auth, kind: 'organization' as const } : auth;
 }
 
 function toToolResult(payload: unknown, opts?: { isError?: boolean }) {
@@ -107,6 +111,9 @@ export async function POST(request: Request) {
   }
 
   const admin = createStaticAdminClient();
+  if (auth.kind === 'operator') {
+    return handleRpc(body, () => operatorRegistry(admin, auth.apiKeyId), true);
+  }
   const user = await resolveMcpOwner(admin, auth.apiKeyId, auth.organizationId);
   if (!user) {
     return NextResponse.json(
@@ -115,6 +122,26 @@ export async function POST(request: Request) {
     );
   }
 
+  return handleRpc(body, async () => {
+    const ctx = { admin, user, apiKeyId: auth.apiKeyId };
+    // Restricted keys start with an empty registry for both discovery and execution.
+    const registry: CrmMcpRegistry = auth.scopes === null
+      ? addWhatsAppTools(buildCrmMcpRegistry({ context: { organizationId: auth.organizationId }, userId: user.id }), ctx)
+      : { tools: [], toolByMcpName: {}, internalKeyByMcpName: {}, mcpNameByInternalKey: {} };
+    const wantsAgentTools = body.method === 'tools/list' ||
+      (body.method === 'tools/call' && typeof body.params?.name === 'string' && body.params.name.startsWith('crm.ai_agents.'));
+    if (wantsAgentTools && isOrgAdmin(user.role) && await isAiAgentsApproved(admin, auth.organizationId)) {
+      addAiAgentTools(registry, ctx, auth.scopes);
+    }
+    return registry;
+  });
+}
+
+async function handleRpc(
+  body: JsonRpcRequest,
+  registryForKey: () => CrmMcpRegistry | Promise<CrmMcpRegistry>,
+  operator = false,
+) {
   if (body.id === undefined) return new NextResponse(null, { status: 202 });
   if (body.method === 'ping') return NextResponse.json(jsonRpcResult(body.id, {}));
 
@@ -129,16 +156,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const ctx = { admin, user, apiKeyId: auth.apiKeyId };
-  // Restricted keys start with an empty registry for both discovery and execution.
-  const registry: CrmMcpRegistry = auth.scopes === null
-    ? addWhatsAppTools(buildCrmMcpRegistry({ context: { organizationId: auth.organizationId }, userId: user.id }), ctx)
-    : { tools: [], toolByMcpName: {}, internalKeyByMcpName: {}, mcpNameByInternalKey: {} };
-  const wantsAgentTools = body.method === 'tools/list' ||
-    (body.method === 'tools/call' && typeof body.params?.name === 'string' && body.params.name.startsWith('crm.ai_agents.'));
-  if (wantsAgentTools && isOrgAdmin(user.role) && await isAiAgentsApproved(admin, auth.organizationId)) {
-    addAiAgentTools(registry, ctx, auth.scopes);
-  }
+  const registry = await registryForKey();
 
   if (body.method === 'tools/list') {
     const tools = registry.tools.map((t) => ({
@@ -175,6 +193,10 @@ export async function POST(request: Request) {
 
       try {
         const out = await (tool as any).execute(parsed.data);
+        // The key can be revoked between authentication and the actual read.
+        if (operator && out?.code === 'AUTH_INVALID') {
+          return NextResponse.json(jsonRpcError(body.id, -32001, 'Invalid API key', { code: 'AUTH_INVALID' }), { status: 401 });
+        }
         return NextResponse.json(jsonRpcResult(body.id, toToolResult(out)));
       } catch (e: any) {
         return NextResponse.json(jsonRpcResult(body.id, toToolResult({ error: e?.message || 'Tool execution failed' }, { isError: true })));
