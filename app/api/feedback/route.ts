@@ -52,7 +52,13 @@ export async function POST(req: Request) {
       request_id: created.id, organization_id: organizationId, kind: a.kind,
       storage_path: a.path, mime: a.mime.split(';')[0].trim(), size_bytes: a.size,
     })));
-    if (attError) console.error('[feedback] anexos não registrados:', attError.message);
+    if (attError) {
+      // Sem os anexos o pedido ficaria pela metade: apaga e deixa a pessoa enviar de novo.
+      console.error('[feedback] anexos não registrados:', attError.message);
+      const { error: delError } = await auth.admin.from('feedback_requests').delete().eq('id', created.id);
+      if (delError) console.error('[feedback] pedido sem anexos não foi apagado:', delError.message);
+      return json({ error: 'Não foi possível registrar os anexos. Tente de novo.' }, 500);
+    }
   }
   return json({ data: created }, 201);
 }
