@@ -10,7 +10,7 @@ export function NotificationPreferences({settings,deviceScope,onClose,onSave,onT
   const [draft,setDraft]=useState(settings.preferences),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [permission,setPermission]=useState(typeof Notification==='undefined' ? 'unsupported' : Notification.permission);
   const set=(patch:Partial<Preferences>)=>setDraft(p=>({...p,...patch}));
-  const button='rounded-lg px-4 py-2 text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-white/5';
+  const button='rounded-lg px-4 py-2 max-md:min-h-11 text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-white/5';
   async function desktop(enabled:boolean) {
     if(!enabled){set({desktop:false});return;}
     if(!('Notification' in window)){setPermission('unsupported');return;}
@@ -19,12 +19,13 @@ export function NotificationPreferences({settings,deviceScope,onClose,onSave,onT
   }
   return <Modal isOpen onClose={onClose} title="Preferências de notificações" size="xl" className="max-w-3xl" footer={<div className="space-y-3">
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-      <div className="flex justify-end gap-3"><button className={button} onClick={onClose} disabled={busy}>Cancelar</button><button className="rounded-lg bg-primary-600 px-4 py-2 text-white text-sm font-medium disabled:opacity-50" disabled={busy || (draft.leads && !draft.boardIds.length)} onClick={async()=>{setBusy(true);setError('');try{await onSave(draft);onClose();}catch(e){setError(e instanceof Error ? e.message : 'Erro ao salvar.');}finally{setBusy(false);}}}>{busy?'Salvando…':'Salvar preferências'}</button></div>
+      <div className="flex justify-end gap-3"><button className={button} onClick={onClose} disabled={busy}>Cancelar</button><button className="rounded-lg bg-primary-600 px-4 py-2 max-md:min-h-11 text-white text-sm font-medium disabled:opacity-50" disabled={busy || (draft.leads && !draft.boardIds.length)} onClick={async()=>{setBusy(true);setError('');try{await onSave(draft);onClose();}catch(e){setError(e instanceof Error ? e.message : 'Erro ao salvar.');}finally{setBusy(false);}}}>{busy?'Salvando…':'Salvar preferências'}</button></div>
     </div>}>
     <div className="space-y-6 text-slate-900 dark:text-slate-100">
-      <p className="text-sm text-slate-500">Suas preferências de avisos neste escritório.</p>
-      <div className="grid gap-6 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-      <div className="min-w-0 space-y-6">
+      <p className="text-sm text-slate-500 dark:text-slate-400">Suas preferências de avisos neste escritório.</p>
+      <div className="grid gap-x-6 gap-y-3 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:grid-rows-[auto_auto_1fr]">
+      {deviceScope && <div className="min-w-0 max-md:mb-3 md:col-start-2 md:row-start-2"><PushDeviceSettings scope={deviceScope} messages={draft.messages} onEnableMessages={()=>set({messages:true})} /></div>}
+      <div className="min-w-0 space-y-6 max-md:mb-3 md:col-start-1 md:row-start-1 md:row-span-3 md:border-r md:border-slate-200 md:pr-6 md:dark:border-slate-700">
       <section className="space-y-3">
         <FormCheckbox label="Alertas dos meus leads" checked={draft.alerts} onChange={alerts=>set({alerts})}>Alertas dos meus leads</FormCheckbox>
         <FormCheckbox label="Novas mensagens de leads" checked={draft.messages} onChange={messages=>set({messages})}>Novas mensagens de leads</FormCheckbox>
@@ -32,16 +33,17 @@ export function NotificationPreferences({settings,deviceScope,onClose,onSave,onT
       </section>
       <section className="space-y-3">
         <FormCheckbox label="Novos leads nos boards" checked={draft.leads} onChange={leads=>set({leads})}>Novos leads nos boards</FormCheckbox>
-        {draft.leads && <><p className="text-xs text-slate-500">Avise quando um lead for criado ou transferido para os boards selecionados.</p>
+        {draft.leads && <><p className="text-xs text-slate-500 dark:text-slate-400">Avise quando um lead for criado ou transferido para os boards selecionados.</p>
           <div className="max-h-60 overflow-y-auto space-y-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
             {settings.boards.length===0 ? <p className="text-sm">Nenhum board disponível.</p> : settings.boards.map(b=><FormCheckbox key={b.id} label={b.name} checked={draft.boardIds.includes(b.id)} onChange={checked=>set({boardIds:checked ? [...draft.boardIds,b.id] : draft.boardIds.filter(id=>id!==b.id)})}>{b.name}</FormCheckbox>)}
           </div>{draft.boardIds.length===0 && <p className="text-xs text-amber-600">Selecione ao menos um board para receber esses avisos.</p>}</>}
       </section>
       </div>
-      <section className="min-w-0 space-y-3 border-t border-slate-200 dark:border-slate-700 pt-5 md:border-t-0 md:border-l md:pl-6 md:pt-0">
+      <div className="min-w-0 space-y-3 border-t border-slate-200 dark:border-slate-700 pt-5 md:col-start-2 md:row-start-1 md:border-t-0 md:pt-0">
         <p className="text-sm font-medium">Onde avisar</p>
-        <p className="text-xs text-slate-500">No CRM, os avisos aparecem na tela e ficam no sino durante esta sessão.</p>
-        {deviceScope && <PushDeviceSettings scope={deviceScope} messages={draft.messages} onEnableMessages={()=>set({messages:true})} />}
+        <p className="text-xs text-slate-500 dark:text-slate-400">No CRM, os avisos aparecem na tela e ficam no sino durante esta sessão.</p>
+      </div>
+      <section className="min-w-0 space-y-3">
         <FormCheckbox label="Também no computador" checked={draft.desktop} onChange={enabled=>void desktop(enabled)}>Também no computador</FormCheckbox>
         {permission==='denied' && <p className="text-xs text-amber-600">Notificações bloqueadas neste navegador. Libere nas configurações do site para usar os avisos no computador.</p>}
         {permission==='unsupported' && <p className="text-xs text-amber-600">Este navegador não oferece avisos no computador. Os avisos no CRM continuam disponíveis.</p>}
@@ -52,7 +54,7 @@ export function NotificationPreferences({settings,deviceScope,onClose,onSave,onT
           <label htmlFor="notification-volume" className="flex justify-between text-sm"><span>Volume do aviso</span><output htmlFor="notification-volume">{draft.volume}%</output></label>
           <input id="notification-volume" type="range" min="0" max="100" step="1" value={draft.volume} onChange={event=>set({volume:Number(event.target.value)})} className="w-full accent-primary-600" />
         </div>
-        <p className="text-xs text-slate-500">Após abrir o CRM, clique na página para liberar o som. Suspensão do computador ou da aba pode atrasar avisos.</p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">Após abrir o CRM, clique na página para liberar o som. Suspensão do computador ou da aba pode atrasar avisos.</p>
         <button className={button} onClick={()=>{if(draft.sound)void unlockNotificationSound().then(()=>onTest(draft)).catch(()=>setError('Não foi possível liberar o som neste navegador.'));else onTest(draft);}}>Testar aviso</button>
       </section>
       </div>

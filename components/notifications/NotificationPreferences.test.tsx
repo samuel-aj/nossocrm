@@ -15,11 +15,13 @@ const device = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/notifications/pushDevice', () => device);
 
-it('applies the selected lead filter with the first explicit device opt-in',async()=>{
+it('puts device opt-in before the lead controls and applies the selected filter on save',async()=>{
   const onSave=vi.fn();
   render(<NotificationPreferences settings={{preferences:DEFAULT_PREFERENCES,boards:[]}} deviceScope={{userId:'signed-in',organizationId:'office'}} onClose={vi.fn()} onSave={onSave} onTest={vi.fn()}/>);
   const button=screen.getByRole('button',{name:'Ativar neste aparelho'});
   await waitFor(()=>expect(button).toBeEnabled());
+  const boards = screen.getByRole('checkbox', {name:'Novos leads nos boards'});
+  expect(button.compareDocumentPosition(boards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await act(async()=>{fireEvent.click(button);});
   expect(screen.getByRole('checkbox',{name:'Novas mensagens de leads'})).toBeChecked();
   const scope=screen.getByRole('combobox',{name:'Receber mensagens de'});
