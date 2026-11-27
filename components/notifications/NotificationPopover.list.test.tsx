@@ -5,7 +5,7 @@ import type { SystemNotification } from '@/hooks/useSystemNotifications';
 import { NotificationPopover } from './NotificationPopover';
 
 const DAY = 86_400_000;
-const state = vi.hoisted(() => ({ notifications: [] as SystemNotification[], notices: [] as Notice[] }));
+const state = vi.hoisted(() => ({ notifications: [] as SystemNotification[], notices: [] as Notice[], refresh: vi.fn() }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ profile: { role: 'admin' } }) }));
 vi.mock('@/hooks/useSystemNotifications', () => ({
   useSystemNotifications: () => ({
@@ -14,7 +14,7 @@ vi.mock('@/hooks/useSystemNotifications', () => ({
   }),
 }));
 vi.mock('./usePersonalNotifications', () => ({
-  usePersonalNotifications: () => ({ notices: state.notices, settings: {}, clear: vi.fn() }),
+  usePersonalNotifications: () => ({ notices: state.notices, settings: {}, clear: vi.fn(), refresh: state.refresh }),
 }));
 
 const system = (id: string, daysAgo: number, extra: Partial<SystemNotification> = {}): SystemNotification => ({
@@ -27,7 +27,14 @@ const notice = (id: string, extra: Partial<Notice> = {}): Notice => ({
 const bell = () => screen.getByRole('button', { name: /^Notificações:/ });
 const openPanel = () => { render(<NotificationPopover />); fireEvent.click(bell()); };
 
-beforeEach(() => { state.notifications = []; state.notices = []; });
+beforeEach(() => { state.notifications = []; state.notices = []; state.refresh.mockClear(); });
+
+it('requests a refresh when opening the bell, not when closing it', () => {
+  openPanel();
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+  fireEvent.click(bell());
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+});
 
 it('opens short and keeps old notices one tap away, without dropping any', () => {
   state.notifications = [system('a', 38), system('b', 46), system('c', 86)];
