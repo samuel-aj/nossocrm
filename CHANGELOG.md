@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Caixa de ajustes com prints, áudio e acompanhamento dos pedidos
+- **Tipo:** Novo
+- **O que mudou:** o mural de sugestões virou **Ajustes**, com prints, arquivos e áudio transcrito. Dá para mandar pelo menu ou pelo botão **Reportar** no topo de qualquer tela. Cada pessoa acompanha os próprios pedidos em "Meus pedidos" e recebe aviso no sino quando o status muda. Os pedidos pendentes do mural antigo entram na nova fila.
+- **Por quê:** o mural só aceitava texto e não mostrava a quem pediu o que aconteceu com o pedido. A caixa também prepara a esteira de ajustes da AJ, que lê os pedidos por uma chave própria.
+- **Quem:** solicitado por Samuel e implementado por Claude Code.
+- **Banco:** tem SQL, três migrações aplicadas nesta ordem: `20261128120000_feedback_requests.sql`, `20261128120100_feedback_bucket.sql` e `20261128120200_feedback_operator.sql`. Desfazer em `docs/feedback-requests-rollback.sql`, depois de voltar o código.
+- **Para voltar:** `prod-pre-caixa-ajustes` (criar na publicação).
+
 ### 27/11/2026 · Troca de escritório pelo topo da tela no celular e no tablet
 - **Tipo:** Correção
 - **O que mudou:** Toque no escritório atual no topo da tela para buscar e abrir outra conta à qual você tem acesso.
