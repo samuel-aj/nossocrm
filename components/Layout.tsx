@@ -480,6 +480,17 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   if (!loading && !user) return null;
 
+  const organizationSwitcher = (
+    <OrgSwitcher
+      inHeader={!isDesktop}
+      collapsed={isDesktop && sidebarCollapsed}
+      officeName={officeName}
+      officeInitials={officeInitials}
+      isSuperAdmin={isSuperAdmin}
+      currentOrgId={profile?.organization_id ?? null}
+    />
+  );
+
   return (
     // max-md:h-dvh: no celular a viewport dinâmica desconta a barra do
     // navegador; com h-screen (100vh) a base do app ficava escondida.
@@ -498,14 +509,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         aria-label="Menu principal"
       >
         <div className="min-h-16 shrink-0 py-3 flex items-center border-b border-[var(--color-border-subtle)] px-5">
-          {/* Card da org; para super admin vira o seletor de organizações */}
-          <OrgSwitcher
-            collapsed={sidebarCollapsed}
-            officeName={officeName}
-            officeInitials={officeInitials}
-            isSuperAdmin={isSuperAdmin}
-            currentOrgId={profile?.organization_id ?? null}
-          />
+          {organizationSwitcher}
         </div>
 
         <nav className="flex-1 p-4 space-y-2 flex flex-col overflow-y-auto" aria-label="Navegação do sistema">
@@ -886,8 +890,9 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           </div>
 
           {/* Header */}
-          <header className="h-16 glass border-b border-[var(--color-border-subtle)] flex items-center justify-end px-6 z-40 shrink-0" role="banner">
-            <div className="flex items-center gap-4">
+          <header className="h-16 glass border-b border-[var(--color-border-subtle)] flex items-center justify-end gap-3 px-6 max-md:px-3 z-40 shrink-0" role="banner">
+            {!isDesktop && <div className="mr-auto min-w-0 max-w-56 flex-1">{organizationSwitcher}</div>}
+            <div className="flex shrink-0 items-center gap-4 max-md:gap-2">
               <button
                 type="button"
                 onClick={() => setIsGlobalAIOpen(!isGlobalAIOpen)}

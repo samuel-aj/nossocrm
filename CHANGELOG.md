@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Troca de escritório pelo topo da tela no celular e no tablet
+- **Tipo:** Correção
+- **O que mudou:** Toque no escritório atual no topo da tela para buscar e abrir outra conta à qual você tem acesso.
+- **Por quê:** O seletor de escritórios ficava na barra lateral do computador e sumia nas telas menores.
+- **Quem:** Samuel pediu e Codex implementou.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-troca-contas-mobile` (etiqueta prevista para a publicação).
+
 ### 27/11/2026 · Uma chave de operador para o Monitor da AJ
 - **Tipo:** Novo
 - **O que mudou:** o superadmin pode criar e revogar a chave de leitura usada pelo Monitor para acompanhar os agentes autorizados de vários escritórios. O painel mostra o último uso e o CRM registra qual escritório foi consultado.

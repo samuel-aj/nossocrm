@@ -17,6 +17,7 @@ interface OrgSummary {
 }
 
 interface OrgSwitcherProps {
+  inHeader?: boolean;
   /** Sidebar recolhida (só iniciais). */
   collapsed: boolean;
   officeName: string;
@@ -35,6 +36,7 @@ interface OrgSwitcherProps {
  * app pra zerar os caches da organização anterior.
  */
 export function OrgSwitcher({
+  inHeader = false,
   collapsed,
   officeName,
   officeInitials,
@@ -190,12 +192,12 @@ export function OrgSwitcher({
         aria-expanded={open}
         aria-label="Trocar organização"
         title="Trocar organização"
-        className="w-full text-left rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors p-1 -m-1 focus-visible-ring"
+        className={`w-full text-left rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 transition-colors p-1 focus-visible-ring ${inHeader ? 'min-h-11' : '-m-1'}`}
       >
         {card}
       </button>
 
-      <MainOrganizationShortcut enabled={isSuperAdmin} currentOrgId={currentOrgId} collapsed={collapsed} busy={!!switchingId} onSelect={handleSwitch} />
+      {!inHeader && <MainOrganizationShortcut enabled={isSuperAdmin} currentOrgId={currentOrgId} collapsed={collapsed} busy={!!switchingId} onSelect={handleSwitch} />}
 
       {open && createPortal(
         <div
@@ -218,7 +220,7 @@ export function OrgSwitcher({
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar organização..."
                 aria-label="Buscar organização"
-                className="w-full pl-8 pr-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-white/5 text-sm outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
+                className="w-full pl-8 pr-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-white/5 text-sm max-xl:text-base outline-none focus:ring-2 focus:ring-primary-500 dark:text-white"
               />
             </div>
           </div>
@@ -244,7 +246,7 @@ export function OrgSwitcher({
                   type="button"
                   onClick={() => handleSwitch(org)}
                   disabled={!!switchingId}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${
+                  className={`w-full max-xl:min-h-11 flex items-center gap-2.5 px-3 py-2 text-left text-sm transition-colors disabled:opacity-60 ${
                     isCurrent
                       ? 'font-bold text-primary-600 dark:text-primary-400'
                       : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-white/5'
