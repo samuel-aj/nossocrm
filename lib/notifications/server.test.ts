@@ -116,7 +116,7 @@ describe('bounded recovery after a suspended notification poll',()=>{
     expect(journalQueries()[0].ranges).toEqual([
       ['gte','created_at','2026-11-26T16:00:00.000Z'],['lte','created_at',current],
     ]);
-    expect(journalQueries()[0].filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery']]);
+    expect(journalQueries()[0].filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery','feedback']]);
   });
 });
 
@@ -161,6 +161,34 @@ describe('WhatsApp entry recovery alerts',()=>{
     tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,alerts:false};
     expect(await notices()).toEqual([]);
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+describe('aviso do pedido de ajuste',()=>{
+  const expected={id:'30',kind:'alert',tone:'green',title:'Seu pedido de ajuste',message:'Corrigido',href:'/suggestions?pedido=r1'};
+  beforeEach(()=>{
+    tables.crm_notification_events=[{id:30,kind:'feedback',source_id:'r1',created_at:now()}];
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:false,alerts:true};
+    tables.feedback_requests=[{id:'r1',status:'corrigido',author_id:user}];
+  });
+  it('avisa quem enviou quando o status muda, inclusive ao reabrir o CRM',async()=>{
+    expect(await notices()).toEqual([expect.objectContaining(expected)]);
+    expect(queries.find(q=>q.table==='feedback_requests')?.filters).toEqual(expect.arrayContaining([['organization_id',org],['id',['r1']],['author_id',user]]));
+    expect((await feed(auth,null,null,null)).events).toEqual([expect.objectContaining(expected)]);
+    tables.feedback_requests[0].status='nao_e_bug';
+    expect(await notices()).toMatchObject([{tone:'red',message:'Não é bug'}]);
+  });
+  it('não avisa outra pessoa nem quem desligou os alertas',async()=>{
+    // A consulta filtra por author_id: para outra pessoa, o banco devolve lista vazia.
+    tables.feedback_requests=[];
+    expect(await notices()).toEqual([]);
+    // Mesmo que a linha volte, o autor é conferido de novo antes do aviso.
+    tables.feedback_requests=[{id:'r1',status:'corrigido',author_id:'outra-pessoa'}];
+    expect(await notices()).toEqual([]);
+    queries.length=0;
+    tables.feedback_requests=[{id:'r1',status:'corrigido',author_id:user}];
+    tables.crm_notification_preferences[0].preferences={...DEFAULT_PREFERENCES,messages:true,alerts:false};
+    expect(await notices()).toEqual([]);
+    expect(queries.some(q=>q.table==='feedback_requests')).toBe(false);
   });
 });
 describe('personal notification security and audiences',()=>{
@@ -268,7 +296,7 @@ describe('durable usage alerts in the personal feed',()=>{
     expect(result.events).toEqual([oldNotice]);
     expect(result.nextAfter).toBeNull();
     expect(usageNotices).toHaveBeenCalledWith(auth.admin,auth.user,null,result.serverTime);
-    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery']]);
+    expect(queries.find(q=>q.table==='crm_notification_events')?.filters).toContainEqual(['kind',['human_handoff','wa_entry_recovery','feedback']]);
     expect(queries.some(q=>q.table==='wa_messages')).toBe(false);
   });
   it('keeps unresolved alerts after an offline interval and uses stable IDs on repeated polls',async()=>{
