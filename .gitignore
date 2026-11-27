@@ -90,6 +90,7 @@ scripts/*
 !scripts/test-wa-agent-connection-db.mjs
 !scripts/test-mcp-whatsapp-db.mjs
 !scripts/test-mcp-ai-agents-db.mjs
+!scripts/test-mcp-operator-db.mjs
 !scripts/mcp-upload-pdf.mjs
 !scripts/checkpoint.mjs
 !scripts/check-changelog.mjs

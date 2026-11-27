@@ -9,6 +9,7 @@ export default defineConfig({
     include: [
       'lib/mcp/**/*.test.ts', 'app/api/mcp/*.test.ts', 'lib/public-api/auth.test.ts',
       'app/api/api-keys/route.test.ts', 'features/settings/components/McpSection.access.test.tsx',
+      'app/api/superadmin/operator-keys/route.test.ts', 'features/security/OperatorKeysPanel.test.tsx',
       'features/wa-agents/AgentEditor.squad.test.tsx',
       'lib/whatsapp/outbound.test.ts', 'lib/whatsapp/sendMessage.test.ts',
       'app/api/whatsapp/send/*.test.ts', 'app/api/public/v1/whatsapp/messages/*.test.ts',

@@ -9,6 +9,7 @@ import { UserRole } from '@/types/constants'
 import { pinTabOrg } from '@/lib/tabOrg'
 import { PASSWORD_HINT, PASSWORD_MIN_LENGTH } from '@/lib/security/passwordPolicy'
 import { SecurityEventsPanel } from '@/features/security/SecurityEventsPanel'
+import { OperatorKeysPanel } from '@/features/security/OperatorKeysPanel'
 import {
   Building2,
   Plus,
@@ -1044,6 +1045,7 @@ export default function AdminPage() {
           ))}
         </div>
 
+        {isSuperAdmin && <OperatorKeysPanel />}
         <SecurityEventsPanel organizations={organizations.map(o => ({ id: o.id, name: o.name }))} />
       </main>
     </div>

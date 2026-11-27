@@ -76,6 +76,7 @@ A restauração não traz de volta arquivos apagados do Storage (seção 5).
 
 | Etiqueta | O que entrou depois dela | SQL de desfazer |
 |---|---|---|
+| `prod-pre-operador-aj-mcp` | Leitura dos agentes autorizados pelo Monitor com uma única chave de operador | Migração `20261127203007_aj_operator_keys.sql`. [Desfazer a chave de operador](aj-operator-keys-rollback.sql) depois de voltar o código. Preserva a auditoria e as chaves dos escritórios. |
 | `prod-pre-retorno-combinado-confirmacao` | Preservação de retornos combinados após respostas do cliente | [Desfazer a mudança nos retornos](retorno-combinado-confirmacao-rollback.sql) após voltar o código. |
 | `prod-pre-aprendizado-agente` | Dúvidas sem resposta e revisão de respostas pelos administradores | [Desfazer o aprendizado](aprendizado-agente-rollback.sql) depois do código, para as duas migrações de aprendizado. Havendo dúvidas gravadas, preserva o histórico e os trechos. Durante a reversão, evite reprocessar, alterar os metadados ou excluir documentos com respostas incluídas. |
 | `prod-pre-mcp-agentes-ia` | Monitoramento de agentes e histórico do roteiro via MCP | `docs/mcp-ai-agents-rollback.sql` depois do código. Revoga as chaves do squad e remove os históricos. |
