@@ -35,14 +35,35 @@ async function scenarios(db, service) {
   await db.query(
     "insert into suggestions(organization_id,author_id,content,status) values($1,$2,'pendente 1','pending'),($1,$2,'feito','done'),($1,$2,'sem status',null)",
     [org, user]);
+  // Sugestão antiga sem data: a importação usa a hora da migração.
+  await db.query("insert into suggestions(organization_id,author_id,content,status,created_at) values($1,$2,'sem data','pending',null)", [org, user]);
+  // Um aviso que já existia: a nova regra de tipos precisa validar as linhas antigas.
+  await db.query("insert into crm_notification_events(organization_id,kind,source_id) values($1,'message',$2)", [org, id(30)]);
 
   const apply = async () => { for (const m of migs) await db.query(await load(m)); };
+  const kindCheckValidated = () => scalar("select convalidated from pg_constraint where conname='crm_notification_events_kind_check'");
+  const bucket = async () => (await db.query(
+    "select public, file_size_limit::int as size, allowed_mime_types as mimes from storage.buckets where id='feedback-anexos'")).rows;
+  const assertBucket = async () => {
+    const rows = await bucket();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].public, false);
+    assert.equal(rows[0].size, 10485760);
+    for (const mime of ['image/png', 'audio/webm', 'application/pdf', 'text/csv', 'application/vnd.ms-excel']) {
+      assert.ok(rows[0].mimes.includes(mime), 'bucket sem ' + mime);
+    }
+    assert.ok(!rows[0].mimes.includes('application/x-msdownload'));
+  };
   await apply();
 
-  // Importação do mural: só pendentes (status pending ou nulo).
-  assert.equal(await scalar("select count(*)::int from feedback_requests where origin='mural'"), 2);
-  // Bucket privado criado uma vez.
-  assert.equal(await scalar("select count(*)::int from storage.buckets where id='feedback-anexos' and public is false"), 1);
+  // Importação do mural: só pendentes (status pending ou nulo), sempre com data.
+  assert.equal(await scalar("select count(*)::int from feedback_requests where origin='mural'"), 3);
+  assert.equal(await scalar("select count(*)::int from feedback_requests where origin='mural' and created_at is null"), 0);
+  // A regra de tipos de aviso termina validada (NOT VALID seguido de VALIDATE) e aceita 'feedback'.
+  assert.equal(await kindCheckValidated(), true);
+  await assert.rejects(db.query("insert into crm_notification_events(organization_id,kind,source_id) values($1,'outro',$2)", [org, id(31)]), { code: '23514' });
+  // Bucket privado criado uma vez, com limite de tamanho e só os tipos aceitos pela caixa.
+  await assertBucket();
 
   // Anônimo e autenticado não leem as tabelas.
   for (const role of ['anon', 'authenticated']) {
@@ -59,6 +80,9 @@ async function scenarios(db, service) {
   await db.query("insert into aj_operator_keys(name,key_prefix,key_hash,created_by,scope) values('Esteira',$1,$2,$3,'feedback')",
     [feedToken.slice(0, 12), hash(feedToken), user]);
   await service.query('set role service_role');
+  // O servidor apaga o pedido recém-criado quando o registro dos anexos falha.
+  const orphan = await value(service, "insert into feedback_requests(organization_id,author_id,body) values($1,$2,'sem anexos') returning id", [org, user]);
+  assert.equal((await service.query('delete from feedback_requests where id=$1', [orphan])).rowCount, 1);
   const auth = async token => (await service.query('select * from aj_operator_authenticate_scoped($1)', [hash(token)])).rows[0];
   const readKey = await auth(readToken), feedKey = await auth(feedToken);
   assert.equal(readKey.scope, 'ai_agents_read');
@@ -77,7 +101,7 @@ async function scenarios(db, service) {
 
   // Listar e ler.
   const list = await call(feedKey.id, 'crm.feedback.list', {});
-  assert.equal(list.requests.length, 2);
+  assert.equal(list.requests.length, 3);
   const reqId = list.requests[0].id;
   const got = await call(feedKey.id, 'crm.feedback.get', { requestId: reqId });
   assert.equal(got.request.author_name, 'Ana');
@@ -118,9 +142,14 @@ async function scenarios(db, service) {
   assert.equal(await scalar("select to_regclass('public.feedback_requests') is null"), true);
   assert.equal(await scalar("select count(*)::int from information_schema.columns where table_name='aj_operator_keys' and column_name='scope'"), 0);
   assert.equal(await scalar('select revoked_at is not null from aj_operator_keys where id=$1', [liveKey]), true);
+  assert.equal(await kindCheckValidated(), true);
+  await assert.rejects(db.query("insert into crm_notification_events(organization_id,kind,source_id) values($1,'feedback',$2)", [org, id(32)]), { code: '23514' });
+  // O bucket fica (o desfazer não apaga arquivos); a reaplicação corrige a configuração dele.
+  await db.query("update storage.buckets set public=true, file_size_limit=1, allowed_mime_types=null where id='feedback-anexos'");
   await apply();
-  assert.equal(await scalar("select count(*)::int from feedback_requests where origin='mural'"), 2);
-  assert.equal(await scalar("select count(*)::int from storage.buckets where id='feedback-anexos'"), 1);
+  assert.equal(await scalar("select count(*)::int from feedback_requests where origin='mural'"), 3);
+  assert.equal(await kindCheckValidated(), true);
+  await assertBucket();
 }
 
 if (!process.argv[2]) throw new Error('Pass the local PostgreSQL bin directory.');

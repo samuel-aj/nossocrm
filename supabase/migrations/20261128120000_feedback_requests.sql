@@ -55,7 +55,8 @@ ALTER TABLE public.feedback_attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.feedback_messages ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.feedback_requests, public.feedback_attachments, public.feedback_messages
   FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.feedback_requests TO service_role;
+-- DELETE: o servidor apaga o pedido recém-criado quando o registro dos anexos falha.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.feedback_requests TO service_role;
 GRANT SELECT, INSERT ON public.feedback_attachments, public.feedback_messages TO service_role;
 
 CREATE FUNCTION private.touch_feedback_request() RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
@@ -68,12 +69,20 @@ CREATE TRIGGER feedback_requests_touch BEFORE UPDATE ON public.feedback_requests
 -- A coluna suggestions.status existe em produção, mas nenhuma migração do repositório a cria;
 -- ler por to_jsonb evita que esta migração falhe num banco montado só pelas migrações.
 INSERT INTO public.feedback_requests(organization_id, author_id, body, origin, created_at)
-SELECT s.organization_id, p.id, left(s.content, 4000), 'mural', s.created_at
+SELECT s.organization_id, p.id, left(s.content, 4000), 'mural', coalesce(s.created_at, now())
 FROM public.suggestions s LEFT JOIN public.profiles p ON p.id = s.author_id
 WHERE coalesce(to_jsonb(s)->>'status', 'pending') = 'pending';
 
--- Aviso no sino quando o status muda.
+-- Aviso no sino quando o status muda. NOT VALID: a troca da regra não lê a tabela inteira
+-- enquanto segura a trava exclusiva; as linhas novas já são conferidas.
 ALTER TABLE public.crm_notification_events DROP CONSTRAINT crm_notification_events_kind_check;
 ALTER TABLE public.crm_notification_events ADD CONSTRAINT crm_notification_events_kind_check
-  CHECK (kind IN ('message','lead','alert','audio_transcription','human_handoff','wa_entry_recovery','feedback'));
+  CHECK (kind IN ('message','lead','alert','audio_transcription','human_handoff','wa_entry_recovery','feedback')) NOT VALID;
+COMMIT;
+
+-- Validação das linhas antigas numa transação própria: a trava exclusiva acima já foi solta e a
+-- VALIDATE usa uma trava leve, que não bloqueia novos avisos enquanto lê a tabela.
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE public.crm_notification_events VALIDATE CONSTRAINT crm_notification_events_kind_check;
 COMMIT;

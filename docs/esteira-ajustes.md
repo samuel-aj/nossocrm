@@ -19,4 +19,4 @@ Qualquer usuário manda ajustes em **Ajustes** (menu) ou pelo botão **Reportar*
 
 ## Publicação
 
-Com autorização, aplique na ordem `20261128120000_feedback_requests.sql`, `20261128120100_feedback_bucket.sql` e `20261128120200_feedback_operator.sql` antes de liberar a versão. Para voltar: código primeiro, depois [o desfazer](feedback-requests-rollback.sql).
+Com autorização, aplique na ordem `20261128120000_feedback_requests.sql`, `20261128120100_feedback_bucket.sql` e `20261128120200_feedback_operator.sql` antes de liberar a versão. Se o código for ao ar antes da `...120200`, a chave do Monitor continua funcionando (autenticação antiga) e só a criação da chave da esteira responde que falta a migração. Para voltar: código primeiro, depois [o desfazer](feedback-requests-rollback.sql).

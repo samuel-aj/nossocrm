@@ -71,10 +71,16 @@ ALTER TABLE public.aj_operator_keys DROP COLUMN IF EXISTS scope;
 DELETE FROM public.crm_notification_events WHERE kind = 'feedback';
 ALTER TABLE public.crm_notification_events DROP CONSTRAINT crm_notification_events_kind_check;
 ALTER TABLE public.crm_notification_events ADD CONSTRAINT crm_notification_events_kind_check
-  CHECK (kind IN ('message','lead','alert','audio_transcription','human_handoff','wa_entry_recovery'));
+  CHECK (kind IN ('message','lead','alert','audio_transcription','human_handoff','wa_entry_recovery')) NOT VALID;
 
 DROP TABLE IF EXISTS public.feedback_messages;
 DROP TABLE IF EXISTS public.feedback_attachments;
 DROP TABLE IF EXISTS public.feedback_requests;
 DROP FUNCTION IF EXISTS private.touch_feedback_request();
+COMMIT;
+
+-- Valida as linhas antigas fora da transação acima, sem bloquear novos avisos.
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE public.crm_notification_events VALIDATE CONSTRAINT crm_notification_events_kind_check;
 COMMIT;
