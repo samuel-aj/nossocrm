@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Sino de notificações no celular
+- **Tipo:** Melhoria
+- **O que mudou:** o sino abre com até cinco avisos recentes por grupo, dos últimos sete dias. Alertas em andamento e alertas críticos ainda não lidos continuam visíveis. Em “Ver anteriores” você encontra os demais avisos do painel. Os atalhos de preferências e conexão ficaram maiores, e a opção de ativar notificações neste aparelho aparece no topo das preferências.
+- **Por quê:** facilitar a leitura dos avisos recentes e a ativação das notificações no celular.
+- **Quem:** solicitado por Samuel, implementado por Claude Code e revisado por Codex.
+- **Banco:** sem SQL.
+- **Para voltar:** `prod-pre-painel-notificacoes-mobile` (criar na publicação).
+
 ### 26/11/2026 · Acompanhamento dos agentes de atendimento pelo AgentMaker
 - **Tipo:** Novo
 - **O que mudou:** o administrador escolhe quais agentes o squad pode acompanhar. O Monitor consulta os atendimentos, e uma chave separada permite ao Engenheiro revisar ou restaurar o roteiro. O CRM registra o original e as alterações manuais e do squad.
