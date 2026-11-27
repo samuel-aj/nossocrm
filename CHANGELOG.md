@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Avisos antigos de consumo sem repetição na tela
+- **Tipo:** Correção
+- **O que mudou:** pendências antigas de consumo da IA e de conexão continuam no sino, mas deixam de reaparecer com som ou aviso na tela ao reabrir o CRM ou trocar de escritório. Avisos novos usam a mesma proteção contra repetição entre abas para som, notificação do computador e aviso na tela.
+- **Por quê:** pendências antigas estavam sendo apresentadas como novos bloqueios, mesmo sem uma nova ocorrência.
+- **Quem:** solicitado por Samuel e implementado por Codex.
+- **Banco:** sem SQL; limites, bloqueios e liberação manual da IA preservados.
+- **Para voltar:** `prod-pre-alertas-consumo` (criar na publicação).
+
 ### 27/11/2026 · Menos consultas automáticas do sino
 - **Tipo:** Correção
 - **O que mudou:** o sino consulta novos avisos a cada minuto e atualiza ao abrir ou voltar para o CRM, com proteção contra consultas seguidas. As preferências deixam de ser consultadas continuamente. Sem internet as consultas param, e falhas repetidas aumentam o intervalo entre tentativas. Ao voltar, o sino recupera até 24 horas desde a última consulta concluída, sem repetir sons de avisos antigos.

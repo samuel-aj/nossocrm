@@ -4,16 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_PREFERENCES, type Notice, type NotificationFeed } from '@/lib/notifications/types';
 
-const h = vi.hoisted(() => ({ org: 'org-one', router: { push: vi.fn() }, deliver: vi.fn(), receivesPush: vi.fn(), deliveryDelay:0 }));
+const h = vi.hoisted(() => ({
+  org: 'org-one', router: { push: vi.fn() }, deliver: vi.fn(), receivesPush: vi.fn(), deliveryDelay:0,
+  present: vi.fn(), presented: new Set<string>(), presentation: 'presented' as 'presented'|'duplicate'|'unavailable',
+}));
 vi.mock('@/lib/notifications/pushDevice', () => ({ receivesDevicePush: h.receivesPush }));
 vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: { id: 'user' }, organizationId: h.org }) }));
 vi.mock('next/navigation', () => ({ useRouter: () => h.router }));
 vi.mock('@/lib/notifications/delivery', () => ({
   deliverNotice: h.deliver, unlockNotificationSound: vi.fn(),
-  presentOnce: async (_scope: string, _id: string, deliver: () => void) => {
-    if(h.deliveryDelay) await new Promise(resolve=>setTimeout(resolve,h.deliveryDelay));
-    deliver();
-  },
+  presentOnce: h.present,
 }));
 import { usePersonalNotifications } from './usePersonalNotifications';
 
@@ -22,7 +22,16 @@ const ordinary: Notice = { ...usage, id: 'message', category: undefined, kind: '
 let client: QueryClient;
 let feed: NotificationFeed;
 beforeEach(() => {
-  vi.useFakeTimers(); h.org = 'org-one'; h.deliver.mockClear(); h.deliveryDelay=0;
+  vi.useFakeTimers(); h.org = 'org-one'; h.deliver.mockReset().mockReturnValue(true); h.deliveryDelay=0;
+  h.presented.clear(); h.presentation='presented';
+  h.present.mockReset().mockImplementation(async (scope:string,id:string,deliver:()=>boolean|void) => {
+    if(h.deliveryDelay) await new Promise(resolve=>setTimeout(resolve,h.deliveryDelay));
+    if(h.presentation!=='presented') return h.presentation;
+    const key=`${scope}:${id}`;
+    if(h.presented.has(key)) return 'duplicate';
+    if(deliver()===false) return 'skipped';
+    h.presented.add(key); return 'presented';
+  });
   vi.setSystemTime(new Date('2026-10-23T10:00:01Z'));
   h.receivesPush.mockResolvedValue(false);
   feed = { events: [usage, ordinary], serverTime: '2026-10-23T10:00:01Z', nextAfter: null };
@@ -33,6 +42,100 @@ beforeEach(() => {
 afterEach(() => { cleanup(); client.clear(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 async function tick(ms = 20) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
+
+it.each(['ai_usage','connection_outage'] as const)('keeps an old %s incident in history without presenting it on remount or organization return', async category => {
+  const oldIncident={...usage,category};
+  // The server clock determines freshness even when the device clock is behind.
+  feed={events:[oldIncident],serverTime:'2026-10-23T10:10:01Z',nextAfter:null};
+  const first=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(first.result.current.notices).toEqual([oldIncident]);
+  expect(first.result.current.toast).toBeNull();
+  first.unmount();
+  const reopened=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(reopened.result.current.notices).toEqual([oldIncident]);
+  expect(reopened.result.current.toast).toBeNull();
+  h.org='org-two';feed={...feed,events:[]};reopened.rerender();
+  await tick();
+  expect(reopened.result.current.notices).toEqual([]);
+  h.org='org-one';feed={...feed,events:[oldIncident]};reopened.rerender();
+  await tick();
+  expect(reopened.result.current.notices).toEqual([oldIncident]);
+  expect(reopened.result.current.toast).toBeNull();
+  expect(h.present).not.toHaveBeenCalled();
+  expect(h.deliver).not.toHaveBeenCalled();
+});
+
+it('preserves an old unresolved block through clear and an incomplete projection without a new alert', async () => {
+  feed={events:[usage],serverTime:'2026-10-23T10:10:01Z',nextAfter:null};
+  const {result}=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  act(()=>result.current.clear());
+  expect(result.current.notices).toEqual([usage]);
+  feed={...feed,events:[],usageNoticesUnavailable:true};
+  await tick(60_000);
+  expect(result.current.notices).toEqual([usage]);
+  expect(result.current.error).toContain('temporariamente indisponíveis');
+  expect(result.current.toast).toBeNull();
+  expect(h.deliver).not.toHaveBeenCalled();
+  feed={...feed,usageNoticesUnavailable:false};
+  await tick(60_000);
+  expect(result.current.notices).toEqual([]);
+});
+
+it('shows a new block once across two mounted consumers and a remount, keeping both histories', async () => {
+  feed={...feed,events:[usage]};
+  const first=renderHook(()=>usePersonalNotifications(),{wrapper});
+  const second=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(first.result.current.notices).toEqual([usage]);
+  expect(second.result.current.notices).toEqual([usage]);
+  expect([first.result.current.toast,second.result.current.toast].filter(Boolean)).toEqual([usage]);
+  expect(h.deliver).toHaveBeenCalledTimes(1);
+  first.unmount();second.unmount();
+  const reopened=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(reopened.result.current.notices).toEqual([usage]);
+  expect(reopened.result.current.toast).toBeNull();
+  expect(h.deliver).toHaveBeenCalledTimes(1);
+});
+
+it('does not show a toast when another tab has already presented the same incident', async () => {
+  h.presentation='duplicate';feed={...feed,events:[usage]};
+  const {result}=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(result.current.notices).toEqual([usage]);
+  expect(result.current.toast).toBeNull();
+  expect(h.deliver).not.toHaveBeenCalled();
+});
+
+it('lets a visible tab present an incident that a silent hidden tab could not deliver', async () => {
+  const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');
+  h.deliver.mockReturnValue(false);feed={...feed,events:[usage]};
+  const hidden=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(hidden.result.current.notices).toEqual([usage]);
+  expect(hidden.result.current.toast).toBeNull();
+  expect(h.presented.size).toBe(0);
+  visibility.mockReturnValue('visible');
+  const visible=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(visible.result.current.notices).toEqual([usage]);
+  expect(visible.result.current.toast).toEqual(usage);
+  expect(h.presented.has('org-one:user:block')).toBe(true);
+  expect(h.deliver).toHaveBeenCalledTimes(2);
+});
+
+it.each(['visible','hidden'] as const)('uses only a local visible toast when shared delivery is unavailable (%s)', async visibility => {
+  vi.spyOn(document,'visibilityState','get').mockReturnValue(visibility);
+  h.presentation='unavailable';feed={...feed,events:[usage]};
+  const {result}=renderHook(()=>usePersonalNotifications(),{wrapper});
+  await tick();
+  expect(result.current.notices).toEqual([usage]);
+  expect(result.current.toast).toEqual(visibility==='visible'?usage:null);
+  expect(h.deliver).not.toHaveBeenCalled();
+});
 
 it('keeps push-enabled messages in the bell without a second desktop or sound alert', async () => {
   h.receivesPush.mockResolvedValue(true);
@@ -118,12 +221,14 @@ it('coalesces bell/focus refreshes and uses the cached preferences', async () =>
 it('keeps the cursor and seen notices when preferences change', async () => {
   const {result}=renderHook(()=>usePersonalNotifications(),{wrapper});
   await tick();
+  act(()=>result.current.dismiss());
   act(()=>client.setQueryData(['personal-notification-settings','org-one:user'],{
     preferences:{...DEFAULT_PREFERENCES,messages:true,sound:true},boards:[],
   }));
   await tick();
   expect(result.current.notices).toHaveLength(2);
   expect(h.deliver).toHaveBeenCalledTimes(2);
+  expect(result.current.toast).toBeNull();
   const last=new URL(String(callsFor('/events').at(-1)![0]),'https://crm.test');
   expect(last.searchParams.get('since')).toBe('2026-10-23T10:00:01Z');
 });
