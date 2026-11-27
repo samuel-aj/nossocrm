@@ -35,6 +35,13 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 - **Quem:** solicitado por Gézer e Samuel, implementado pelo Codex.
 - **Banco:** `20261127190000_keep_agreed_robot_return.sql`. Reversão em `docs/retorno-combinado-confirmacao-rollback.sql`.
 - **Para voltar:** use o ponto de restauração `prod-pre-retorno-combinado-confirmacao` previsto para a publicação e siga a ordem indicada no SQL de reversão.
+### 27/11/2026 · Avisos antigos de consumo sem repetição na tela
+- **Tipo:** Correção
+- **O que mudou:** pendências antigas de consumo da IA e de conexão continuam no sino, mas deixam de reaparecer com som ou aviso na tela ao reabrir o CRM ou trocar de escritório. Avisos novos usam a mesma proteção contra repetição entre abas para som, notificação do computador e aviso na tela.
+- **Por quê:** pendências antigas estavam sendo apresentadas como novos bloqueios, mesmo sem uma nova ocorrência.
+- **Quem:** solicitado por Samuel e implementado por Codex.
+- **Banco:** sem SQL; limites, bloqueios e liberação manual da IA preservados.
+- **Para voltar:** `prod-pre-alertas-consumo` (criar na publicação).
 
 ### 27/11/2026 · Menos consultas automáticas do sino
 - **Tipo:** Correção
