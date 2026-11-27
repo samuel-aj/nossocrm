@@ -7,6 +7,7 @@ const h = vi.hoisted(() => ({
   reads: [] as string[],
   denied: false,
   guard: vi.fn(),
+  setHeader: vi.fn().mockReturnThis(),
   organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 }));
 
@@ -36,6 +37,7 @@ vi.mock('../../../../_shared', async importOriginal => ({
           select: () => query,
           eq: (key: string, value: unknown) => { filters.push([key, value]); return query; },
           order: () => query,
+          setHeader: h.setHeader,
           update: (value: Row) => { patch = value; return query; },
           maybeSingle: async () => ({ ...result(), data: result().data[0] ?? null }),
           then: (resolve: (value: ReturnType<typeof result>) => unknown) => resolve(result()),
@@ -63,6 +65,7 @@ const patch = (body: unknown) => PATCH(
 beforeEach(() => {
   h.denied = false;
   h.guard.mockClear();
+  h.setHeader.mockClear();
   h.reads = [];
   h.writes = [];
   h.rows = {
@@ -96,7 +99,9 @@ describe('media repetition preference PATCH', () => {
     const result = await response.json();
     expect(result.media.send_once_per_conversation).toBe(value);
     expect(h.writes[0].patch).toEqual({ name: 'saudacao' });
+    expect(h.setHeader).toHaveBeenCalledWith('x-crm-prompt-editor', 'admin');
     expect(result.system_prompt).toBe('Envie [[midia:saudacao]] quando começar.');
+    expect(h.rows.wa_ai_agents[0].system_prompt).toBe(result.system_prompt);
   });
 
   it.each(['organization_id', 'agent_id'])('refuses a media belonging to another %s without any mutation', async field => {

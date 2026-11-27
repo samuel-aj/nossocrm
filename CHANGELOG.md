@@ -28,6 +28,14 @@ Como voltar a uma versão anterior: [docs/restauracao.md](docs/restauracao.md).
 
 <!-- NOVAS ENTRADAS LOGO ABAIXO DESTA LINHA -->
 
+### 27/11/2026 · Dúvidas sem resposta na base de conhecimento do agente
+- **Tipo:** Novo
+- **O que mudou:** em Recursos, o administrador pode ativar “Aprender com dúvidas sem resposta” para cada agente. Na aba Conhecimento, ele revisa as dúvidas registradas e escolhe quais respostas incluir na base. Perguntas registradas apenas no simulador recebem a etiqueta “Só no teste”.
+- **Por quê:** aproveitar dúvidas recorrentes dos clientes e permitir que o escritório confira a resposta antes de disponibilizá-la ao agente.
+- **Quem:** solicitado por Samuel, implementado por Claude Code e revisado por Codex.
+- **Banco:** migrações `20261127171912_wa_ai_agent_knowledge_gaps.sql` e `20261127172229_wa_ai_review_knowledge_gap.sql`. Reversão em `docs/aprendizado-agente-rollback.sql`.
+- **Para voltar:** `prod-pre-aprendizado-agente`.
+
 ### 27/11/2026 · Sino de notificações no celular
 - **Tipo:** Melhoria
 - **O que mudou:** o sino abre com até cinco avisos recentes por grupo, dos últimos sete dias. Alertas em andamento e alertas críticos ainda não lidos continuam visíveis. Em “Ver anteriores” você encontra os demais avisos do painel. Os atalhos de preferências e conexão ficaram maiores, e a opção de ativar notificações neste aparelho aparece no topo das preferências.
